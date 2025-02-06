@@ -14,7 +14,7 @@ for root, dirs, files in tqdm(os.walk(root_dir)):
         # Check for .nii.gz extension and skip if 'seg' is in the filename
         if fname.endswith(".nii.gz") and "seg" not in fname.lower():
             file_path = os.path.join(root, fname)
-            print(f"Processing: {file_path}")
+            #print(f"Processing: {file_path}")
 
             # Load the NIfTI image
             img = nib.load(file_path)
