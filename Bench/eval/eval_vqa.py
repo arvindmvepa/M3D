@@ -9,9 +9,12 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 from Bench.dataset.multi_dataset import VQADataset
 from Bench.eval.metrics import compute_exact_match, qa_f1_score
+from LaMed.src.dataset.multi_dataset import VQABratsDataset
 # If the model is not from huggingface but local, please uncomment and import the model architecture.
 # from LaMed.src.model.language_model import *
 import evaluate
+from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
+
 
 bleu = evaluate.load("bleu")
 bertscore = evaluate.load("bertscore")
@@ -32,7 +35,7 @@ def seed_everything(seed):
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name_or_path', type=str, default="GoodBaiBai88/M3D-LaMed-Llama-2-7B", choices=[])
+    parser.add_argument('--model_name_or_path', type=str, default="GoodBaiBai88/M3D-LaMed-Llama-2-7B")
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--max_new_tokens', type=int, default=256)
     parser.add_argument('--do_sample', type=bool, default=False)
@@ -43,7 +46,6 @@ def parse_args(args=None):
     # data
     parser.add_argument('--data_root', type=str, default="./Data/data")
     parser.add_argument('--vqa_data_test_path', type=str, default="./Data/data/M3D-VQA/M3D_VQA_test.csv")
-    parser.add_argument('--close_ended', type=bool, default=True)
     parser.add_argument('--output_dir', type=str, default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa/")
 
     parser.add_argument('--proj_out_num', type=int, default=256)
@@ -55,6 +57,26 @@ def postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]
     labels = [[label.strip()] for label in labels]
     return preds, labels
+
+
+def get_tokenizer(model_path):
+    # Load tokenizer from the given path with specified configurations
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        padding_side="right",
+        use_fast=False,
+    )
+
+    # Define and add special tokens
+    special_token = {"additional_special_tokens": ["<im_patch>", "<bx_start>", "<bx_end>"]}
+    tokenizer.add_special_tokens(
+        special_token
+    )
+    tokenizer.add_tokens("[SEG]")
+
+    if tokenizer.unk_token is not None and tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.unk_token
+    return tokenizer
         
           
 def main():
@@ -62,21 +84,29 @@ def main():
     args = parse_args()
     device = torch.device(args.device)
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.model_name_or_path,
-        model_max_length=args.max_length,
-        padding_side="right",
-        use_fast=False,
-        trust_remote_code=True
-    )
+    tokenizer = get_tokenizer(args.model_name_or_path)
+    """
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         device_map='auto',
         trust_remote_code=True
     )
+    """
+    if 'llama' in args.model_name_or_path.lower():
+        model = LamedLlamaForCausalLM.from_pretrained(
+            args.model_name_or_path,
+        )
+    elif 'phi3' in args.model_name_or_path.lower():
+        model = LamedPhi3ForCausalLM.from_pretrained(
+            args.model_name_or_path,
+        )
+    else:
+        raise ValueError(f"Unknown Model Type {model_args.model_type}")
+    print("model: ", model.__class__)
     model = model.to(device=device)
 
-    test_dataset = VQADataset(args, tokenizer=tokenizer, close_ended=args.close_ended, mode='test')
+    #test_dataset = VQADataset(args, tokenizer=tokenizer, close_ended=args.close_ended, mode='test')
+    test_dataset = VQABratsDataset(args, tokenizer=tokenizer, mode='test')
 
     test_dataloader = DataLoader(
             test_dataset,
@@ -90,68 +120,43 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    if args.close_ended:
-        output_path = os.path.join(args.output_dir, "eval_close_vqa.csv")
-        with open(output_path, mode='w') as outfile:
-            writer = csv.writer(outfile)
-            writer.writerow(["Question Type", "Question", "Answer", "Answer Choice", "Pred", "Correct"])
-            for sample in tqdm(test_dataloader):
-                question = sample["question"]
-                question_type = sample["question_type"].item()
-                answer_choice = sample["answer_choice"]
-                answer = sample['answer']
+    output_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
+    with open(output_path, mode='w') as outfile:
+        writer = csv.writer(outfile)
+        writer.writerow(["Question Type", "Question", "Answer", "Pred", "accuracy", "bleu", "rouge1", "meteor", "bert_f1"])
+        for sample in tqdm(test_dataloader):
+            question = sample["question"][0]
+            question_type = sample["question_type"][0]
+            answer = sample['answer']
 
-                image = sample["image"].to(device=device)
+            image = sample["image"].to(device=device)
+            input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
 
-                input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
+            with torch.inference_mode():
+                generation = model.generate(images=image, inputs=input_id, max_new_tokens=args.max_new_tokens,
+                                            do_sample=args.do_sample, top_p=args.top_p,
+                                            temperature=args.temperature)
+            generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
 
-                with torch.inference_mode():
-                    generation = model.generate(image, input_id, max_new_tokens=args.max_new_tokens,
-                                                do_sample=args.do_sample, top_p=args.top_p,
-                                                temperature=args.temperature)
-                generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
+            result = dict()
+            decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
 
-                if answer_choice[0] + '.' in generated_texts[0]:
-                    correct = 1
-                else:
-                    correct = 0
+            result["accuracy"] = compute_exact_match(decoded_preds, decoded_labels)
 
-                writer.writerow([question_type, question[0], answer[0], answer_choice[0], generated_texts[0], correct])
-    else:
-        output_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
-        with open(output_path, mode='w') as outfile:
-            writer = csv.writer(outfile)
-            writer.writerow(["Question Type", "Question", "Answer", "Pred", "bleu", "rouge1", "meteor", "bert_f1"])
-            for sample in tqdm(test_dataloader):
-                question = sample["question"]
-                question_type = sample["question_type"].item()
-                answer = sample['answer']
+            bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
+            result["bleu"] = bleu_score['bleu']
 
-                image = sample["image"].to(device=device)
-                input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
+            rouge_score = rouge.compute(predictions=decoded_preds, references=decoded_labels, rouge_types=['rouge1'])
+            result["rouge1"] = rouge_score['rouge1']
 
-                with torch.inference_mode():
-                    generation = model.generate(image, input_id, max_new_tokens=args.max_new_tokens,
-                                                do_sample=args.do_sample, top_p=args.top_p,
-                                                temperature=args.temperature)
-                generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
+            meteor_score = meteor.compute(predictions=decoded_preds, references=decoded_labels)
+            result["meteor"] = meteor_score['meteor']
 
-                result = dict()
-                decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
-                bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
-                result["bleu"] = bleu_score['bleu']
+            bert_score = bertscore.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
+            result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
 
-                rouge_score = rouge.compute(predictions=decoded_preds, references=decoded_labels, rouge_types=['rouge1'])
-                result["rouge1"] = rouge_score['rouge1']
-
-                meteor_score = meteor.compute(predictions=decoded_preds, references=decoded_labels)
-                result["meteor"] = meteor_score['meteor']
-
-                bert_score = bertscore.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
-                result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
-
-                writer.writerow(
-                    [question_type, question[0], answer[0], generated_texts[0], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
+            writer.writerow(
+                [question_type, question, answer[0], generated_texts[0], result["accuracy"], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
 
 if __name__ == "__main__":
     main()

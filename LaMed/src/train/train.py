@@ -384,7 +384,8 @@ def main():
     else:
         train_dataset = UniDatasets(data_args, tokenizer, mode='train')
 
-    eval_dataset = CapDataset(data_args, tokenizer, mode='validation')
+    #eval_dataset = CapDataset(data_args, tokenizer, mode='validation')
+    eval_dataset = UniDatasets(data_args, tokenizer, mode='validation')
     data_collator = DataCollator(data_args.seg_enable)
 
     rank0_print("="*20 + " Training " + "="*20)
