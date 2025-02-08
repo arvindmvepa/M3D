@@ -13,7 +13,6 @@ CUDA_VISIBLE_DEVICES="$1" accelerate launch LaMed/src/train/train.py \
     --vision_tower vit3d \
     --pretrain_vision_model ./LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
     --pretrain_mm_mlp_adapter ./LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
-    --segmentation_module segvol \
     --bf16 True \
     --output_dir ./LaMed/output/LaMed-Phi3-4B-finetune-0000 \
     --num_train_epochs 5 \
