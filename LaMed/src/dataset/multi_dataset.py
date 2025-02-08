@@ -376,9 +376,6 @@ class VQABratsDataset(VQADataset):
 
         image_abs_path = data["volume_non_seg_files"]["t1c"]
         new_image_abs_path = self.convert_file_path_to_npy(image_abs_path)
-        print(new_image_abs_path)
-        import sys
-        sys.stdout.flush()
         image = np.load(new_image_abs_path)
 
         image = self.transform(image)
@@ -420,8 +417,8 @@ class VQABratsDataset(VQADataset):
             'attention_mask': attention_mask,
             'question': question,
             'answer': answer,
-            'answer_choice': data["Answer Choice"],
-            'question_type': data["Question Type"],
+            'answer_choice': answer,
+            'question_type': 'open_ended',
         }
         return ret
 
