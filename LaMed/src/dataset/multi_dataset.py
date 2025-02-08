@@ -375,6 +375,9 @@ class VQABratsDataset(VQADataset):
 
         # TODO: Figure out how to use more modalities
         image_abs_path = data["volume_non_seg_files"]["t1c"]
+        print(image_abs_path)
+        import sys
+        sys.stdout.flush()
         image = np.load(image_abs_path)
 
         image = self.transform(image)
