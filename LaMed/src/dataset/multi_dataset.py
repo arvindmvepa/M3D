@@ -371,14 +371,15 @@ class VQABratsDataset(VQADataset):
         return data_list
 
     def __getitem__(self, idx):
+        # TODO: Figure out how to use more modalities
         data = self.data_list[idx]
 
-        # TODO: Figure out how to use more modalities
         image_abs_path = data["volume_non_seg_files"]["t1c"]
-        print(image_abs_path)
+        new_image_abs_path = self.convert_file_path_to_npy(image_abs_path)
+        print(new_image_abs_path)
         import sys
         sys.stdout.flush()
-        image = np.load(image_abs_path)
+        image = np.load(new_image_abs_path)
 
         image = self.transform(image)
 
@@ -423,6 +424,16 @@ class VQABratsDataset(VQADataset):
             'question_type': data["Question Type"],
         }
         return ret
+
+    def convert_file_path_to_npy(self, image_abs_path):
+        volume_abs_dir = os.path.dirname(image_abs_path)
+        base_dir = os.path.dirname(volume_abs_dir)
+        new_base_dir = base_dir + "_npy"
+
+        volume_dir = os.path.basename(volume_abs_dir)
+        image_file = os.path.basename(image_abs_path)
+        new_image_abs_path = os.path.join(new_base_dir, volume_dir, image_file + ".npy")
+        return new_image_abs_path
 
 
 class VQAYNDataset(Dataset):
