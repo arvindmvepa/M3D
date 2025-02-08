@@ -371,7 +371,7 @@ class VQABratsDataset(VQADataset):
         return data_list
 
     def __getitem__(self, idx):
-        data = self.data_list.iloc[idx]
+        data = self.data_list[idx]
 
         # TODO: Figure out how to use more modalities
         image_abs_path = data["volume_non_seg_files"]["t1c"]
