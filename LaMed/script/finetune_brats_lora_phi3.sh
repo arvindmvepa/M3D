@@ -2,8 +2,7 @@
 
 # run "accelerate config" first!
 
-
-accelerate launch LaMed/src/train/train.py \
+CUDA_VISIBLE_DEVICES="$1" accelerate launch LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \

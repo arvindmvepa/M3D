@@ -363,7 +363,7 @@ class VQADataset(Dataset):
                 idx = random.randint(0, len(self.data_list) - 1)
 
 
-class VQABrats(VQADataset):
+class VQABratsDataset(VQADataset):
 
     def read_data_file(self, vqa_data_file, **kwargs):
         with open(vqa_data_file, 'r') as f:
