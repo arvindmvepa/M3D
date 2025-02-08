@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # run "accelerate config" first!
-accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
+export CUDA_VISIBLE_DEVICES=$1
+accelerate launch LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \
