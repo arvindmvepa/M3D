@@ -252,11 +252,11 @@ class VQADataset(Dataset):
         self.image_tokens = "<im_patch>" * args.proj_out_num
 
         if mode == "train":
-            self.data_list = pd.read_csv(args.vqa_data_train_path)
+            self.data_list = self.read_data_file(args.vqa_data_train_path)
         elif mode == "validation":
-            self.data_list = pd.read_csv(args.vqa_data_val_path, nrows=2048)
+            self.data_list = self.read_data_file(args.vqa_data_val_path, nrows=2048)
         elif "test" in mode:
-            self.data_list = pd.read_csv(args.vqa_data_test_path)
+            self.data_list = self.read_data_file(args.vqa_data_test_path)
         else:
             print("The mode is not desired ! ")
 
@@ -289,6 +289,10 @@ class VQADataset(Dataset):
 
     def __len__(self):
         return len(self.data_list)
+
+    def read_data_file(self, vqa_data_file, **kwargs):
+        data_list = pd.read_csv(vqa_data_file, **kwargs)
+        return data_list
 
     def __getitem__(self, idx):
         max_attempts = 100
@@ -357,6 +361,65 @@ class VQADataset(Dataset):
             except Exception as e:
                 print(f"Error in __getitem__ at index {idx}: {e}")
                 idx = random.randint(0, len(self.data_list) - 1)
+
+
+class VQABrats(VQADataset):
+
+    def read_data_file(self, vqa_data_file, **kwargs):
+        with open(vqa_data_file, 'r') as f:
+            data_list = json.load(f)
+        return data_list
+
+    def __getitem__(self, idx):
+        data = self.data_list.iloc[idx]
+
+        # TODO: Figure out how to use more modalities
+        image_abs_path = data["volume_non_seg_files"]["t1c"]
+        image = np.load(image_abs_path)
+
+        image = self.transform(image)
+
+        question = data["question"]
+        answer = str(data["answer"])
+
+
+        question = self.image_tokens + ' ' + question
+        text_tensor = self.tokenizer(
+            question + ' ' + answer, max_length=self.args.max_length, truncation=True, padding="max_length", return_tensors="pt",
+        )
+
+        input_id = text_tensor["input_ids"][0]
+        attention_mask = text_tensor["attention_mask"][0]
+
+        valid_len = torch.sum(attention_mask)
+        if valid_len < len(input_id):
+            input_id[valid_len] = self.tokenizer.eos_token_id
+
+        question_tensor = self.tokenizer(
+            question, max_length=self.args.max_length, truncation=True, padding="max_length", return_tensors="pt"
+        )
+        question_len = torch.sum(question_tensor["attention_mask"][0])
+
+        label = input_id.clone()
+        label[:question_len] = -100
+        if self.tokenizer.pad_token_id == self.tokenizer.eos_token_id:
+            label[label == self.tokenizer.pad_token_id] = -100
+            if valid_len < len(label):
+                label[valid_len] = self.tokenizer.eos_token_id
+        else:
+            label[label == self.tokenizer.pad_token_id] = -100
+
+        ret = {
+            'image': image,
+            'input_id': input_id,
+            'label': label,
+            'attention_mask': attention_mask,
+            'question': question,
+            'answer': answer,
+            'answer_choice': data["Answer Choice"],
+            'question_type': data["Question Type"],
+        }
+        return ret
 
 
 class VQAYNDataset(Dataset):
@@ -1180,11 +1243,12 @@ class UniDatasets(Dataset):
     def __init__(self, args, tokenizer, mode='train'):
         super(UniDatasets, self).__init__()
         self.ds_list = [
-            CapDataset(args, tokenizer, mode),
-            VQADataset(args, tokenizer, close_ended=True, mode=mode),
-            VQADataset(args, tokenizer, close_ended=False, mode=mode),
-            VQAYNDataset(args, tokenizer, mode=mode),
-            MultiPosDataset(args, tokenizer, mode),
+            VQABratsDataset(args, tokenizer, mode=mode),
+            # CapDataset(args, tokenizer, mode),
+            # VQADataset(args, tokenizer, close_ended=True, mode=mode),
+            # VQADataset(args, tokenizer, close_ended=False, mode=mode),
+            # VQAYNDataset(args, tokenizer, mode=mode),
+            # MultiPosDataset(args, tokenizer, mode),
             # MultiSegDataset(args, tokenizer, mode),
             # MultiSegDataset(args, tokenizer, mode),
         ]
