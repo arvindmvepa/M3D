@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # run "accelerate config" first!
+output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-0000
 accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
@@ -13,7 +14,7 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --pretrain_vision_model ./LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
     --pretrain_mm_mlp_adapter ./LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
     --bf16 True \
-    --output_dir ./LaMed/output/LaMed-Phi3-4B-finetune-0000 \
+    --output_dir $output_dir \
     --num_train_epochs 5 \
     --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 4 \
@@ -33,3 +34,9 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --dataloader_pin_memory True\
     --dataloader_num_workers 8 \
     --report_to tensorboard
+
+PYTHONPATH=. CUDA_VISIBLE_DEVICES="" python LaMed/src/utils/merge_lora_weights_and_save_hf_model.py \
+--version="" --model_type="phi3" \
+--model_with_lora="$output_dir"/model_with_lora.bin \
+--output_dir="$output_dir"/hf
+
