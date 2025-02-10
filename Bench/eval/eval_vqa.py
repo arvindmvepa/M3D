@@ -9,6 +9,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 from Bench.dataset.multi_dataset import VQADataset
 from Bench.eval.metrics import compute_exact_match, qa_f1_score
+from LaMed.src.dataset.multi_dataset import VQABratsDataset
 # If the model is not from huggingface but local, please uncomment and import the model architecture.
 # from LaMed.src.model.language_model import *
 import evaluate
@@ -76,7 +77,8 @@ def main():
     )
     model = model.to(device=device)
 
-    test_dataset = VQADataset(args, tokenizer=tokenizer, close_ended=args.close_ended, mode='test')
+    #test_dataset = VQADataset(args, tokenizer=tokenizer, close_ended=args.close_ended, mode='test')
+    test_dataset = VQABratsDataset(args, tokenizer=tokenizer, mode='test')
 
     test_dataloader = DataLoader(
             test_dataset,

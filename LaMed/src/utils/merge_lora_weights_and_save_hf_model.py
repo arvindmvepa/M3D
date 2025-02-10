@@ -40,7 +40,7 @@ class ModelArguments:
     proj_pooling_size: int = field(default=2, metadata={"help": "Size of pooling in Perceiver."})
 
     # segvol
-    segmentation_module: str = field(default="segvol") # None, "segvol"
+    segmentation_module: str = field(default=None) # None, "segvol"
     pretrain_seg_module: str = field(default=None, metadata={"help": "Pretrained segvol model."})
 
 @dataclass
