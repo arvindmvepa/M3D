@@ -7,7 +7,7 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \
     --multimodal True \
-    --combined_projector True \
+    --combined_projector False \
     --pretrain_mm_mlp_adapter ./LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
     --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_v2.json \
     --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_v2.json \
@@ -18,9 +18,9 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --bf16 True \
     --output_dir $output_dir \
     --num_train_epochs 5 \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 1 \
     --evaluation_strategy "steps" \
     --eval_accumulation_steps 1 \
     --eval_steps 0.04 \
