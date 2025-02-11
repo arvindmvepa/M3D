@@ -51,22 +51,28 @@ def main():
         content_scores[content_type]["accuracy"].append(accuracy)
 
         if label_name not in label_scores:
-            label_scores[label_name] = {"accuracy": [], "none_count": []}
-        label_scores[label_name]["accuracy"].append(accuracy)
+            label_scores[label_name] = {"overall": {"accuracy": [], "none_count": []}}
+            if content_type not in label_scores[label_name]:
+                label_scores[label_name][content_type] = {"accuracy": [], "none_count": []}
+        label_scores[label_name]["overall"]["accuracy"].append(accuracy)
+        label_scores[label_name][content_type].append(accuracy)
 
         if answer.strip().lower() == "none":
             content_scores[content_type]["none_count"].append(1)
-            label_scores[label_name]["none_count"].append(1)
+            label_scores[label_name]["overall"]["none_count"].append(1)
+            label_scores[label_name][content_type]["none_count"].append(1)
         else:
             content_scores[content_type]["none_count"].append(0)
-            label_scores[label_name]["none_count"].append(0)
+            label_scores[label_name]["overall"]["none_count"].append(0)
+            label_scores[label_name][content_type]["none_count"].append(0)
 
     for content_type in content_scores.keys():
         content_scores[content_type]["accuracy"] = np.mean(content_scores[content_type]["accuracy"])
         content_scores[content_type]["none_count"] = np.mean(content_scores[content_type]["none_count"])
     for label_name in label_scores.keys():
-        label_scores[label_name]["accuracy"] = np.mean(label_scores[label_name]["accuracy"])
-        label_scores[label_name]["none_count"] = np.mean(label_scores[label_name]["none_count"])
+        for content_type in label_scores[label_name].keys():
+            label_scores[label_name][content_type]["accuracy"] = np.mean(label_scores[label_name][content_type]["accuracy"])
+            label_scores[label_name][content_type]["none_count"] = np.mean(label_scores[label_name][content_type]["none_count"])
 
     summary['content_scores'] = content_scores
     summary['label_scores'] = label_scores
