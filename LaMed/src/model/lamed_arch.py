@@ -115,11 +115,11 @@ class LamedMetaForCausalLM(ABC):
 
     def encode_images(self, images):
         image_features = []
-        #for index in range(4):
-        #    image_features_ = self.get_model().get_vision_tower()(images[:, index])
-        #    image_features.append(image_features_)
-        #image_features = torch.cat(image_features, dim=1)
-        image_features = self.get_model().get_vision_tower()(images[:, 0])
+        for index in range(4):
+            image_features_ = self.get_model().get_vision_tower()(images[:, index])
+            image_features.append(image_features_)
+        image_features = torch.cat(image_features, dim=1)
+        #image_features = self.get_model().get_vision_tower()(images[:, 0])
         print("image_features (int 1): ", image_features.shape)
         image_features = self.get_model().mm_projector(image_features)
         print("image_features (int 2): ", image_features.shape)
