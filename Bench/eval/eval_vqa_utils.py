@@ -17,10 +17,10 @@ def main():
     output_eval_summary_path = os.path.join(args.output_dir, "eval_vqa_summary.json")
     with open(input_eval_path, mode='r') as infile:
         reader = csv.reader(infile, delimiter=",")
+        # skip first row
+        next(csv_reader)
         for row, sample in tqdm(zip(reader, test_dataset)):
-            print(row[4])
-            accuracy = float(row[4])
-
+            accuracy = float(row[4])bug fi
             answer = sample['answer']
             q_lang = sample['q_lang']
             qid = sample.get('qid', None)
