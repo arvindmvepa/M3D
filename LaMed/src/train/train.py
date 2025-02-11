@@ -377,8 +377,12 @@ def main():
 
     rank0_print("="*20 + " Dataset preparation " + "="*20)
     data_args.max_length = training_args.model_max_length
-    data_args.proj_out_num = model.get_model().mm_projector.proj_out_num
-    rank0_print("vision tokens output from projector: ", data_args.proj_out_num)
+    if model_args.combined_projector:
+        data_args.proj_out_num = model.get_model().mm_projector.proj_out_num * 4
+        rank0_print("vision tokens output from projector (combined projector): ", data_args.proj_out_num)
+    else:
+        data_args.proj_out_num = model.get_model().mm_projector.proj_out_num
+        rank0_print("vision tokens output from projector: ", data_args.proj_out_num)
     data_args.seg_enable = hasattr(model.get_model(), "seg_module")
 
     if model_args.tune_mm_mlp_adapter:
