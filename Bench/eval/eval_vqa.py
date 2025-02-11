@@ -99,7 +99,7 @@ def main():
             writer.writerow(["Question Type", "Question", "Answer", "Answer Choice", "Pred", "Correct"])
             for sample in tqdm(test_dataloader):
                 question = sample["question"][0]
-                answer_type = sample["answer_type"][0]
+                question_type = sample["question_type"][0]
                 answer_choice = sample["answer_choice"][0]
                 answer = sample['answer'][0]
 
@@ -118,7 +118,7 @@ def main():
                 else:
                     correct = 0
 
-                writer.writerow([answer_type, question[0], answer[0], answer_choice[0], generated_texts[0], correct])
+                writer.writerow([question_type, question[0], answer[0], answer_choice[0], generated_texts[0], correct])
     else:
         output_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
         with open(output_path, mode='w') as outfile:
@@ -126,7 +126,7 @@ def main():
             writer.writerow(["Question Type", "Question", "Answer", "Pred", "bleu", "rouge1", "meteor", "bert_f1"])
             for sample in tqdm(test_dataloader):
                 question = sample["question"][0]
-                answer_type = sample["answer_type"][0]
+                question_type = sample["question_type"][0]
                 answer = sample['answer'][0]
 
                 image = sample["image"].to(device=device)
@@ -153,7 +153,7 @@ def main():
                 result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
 
                 writer.writerow(
-                    [answer_type, question[0], answer[0], generated_texts[0], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
+                    [question_type, question[0], answer[0], generated_texts[0], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
 
 if __name__ == "__main__":
     main()
