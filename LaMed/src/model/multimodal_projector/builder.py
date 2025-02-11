@@ -84,7 +84,6 @@ def build_mm_projector(config, delay_load=False, **kwargs):
         return FullLinear(config)
 
     elif projector_type == 'spp':
-        print("config ", config)
         return SpatialPoolingProjector(image_size=config.image_size,
                                        multimodal=config.multimodal,
                                        patch_size=config.patch_size,

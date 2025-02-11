@@ -63,7 +63,6 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
         input_ids_pre = input_ids
 
         if inputs_embeds is None:
-            print("images ", images.shape)
             (
                 input_ids,
                 position_ids,
@@ -135,7 +134,6 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
             outputs.loss = outputs.loss + seg_loss
             return outputs
         else:
-            print("inputs_embeds ", inputs_embeds.shape)
             return super().forward(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
