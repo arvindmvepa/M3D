@@ -46,7 +46,6 @@ def parse_args(args=None):
     # data
     parser.add_argument('--data_root', type=str, default="./Data/data")
     parser.add_argument('--vqa_data_test_path', type=str, default="./Data/data/M3D-VQA/M3D_VQA_test.csv")
-    parser.add_argument('--close_ended', type=bool, default=False)
     parser.add_argument('--output_dir', type=str, default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa/")
 
     parser.add_argument('--proj_out_num', type=int, default=256)
@@ -121,71 +120,43 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    if args.close_ended:
-        output_path = os.path.join(args.output_dir, "eval_close_vqa.csv")
-        with open(output_path, mode='w') as outfile:
-            writer = csv.writer(outfile)
-            writer.writerow(["Question Type", "Question", "Answer", "Answer Choice", "Pred", "Correct"])
-            for sample in tqdm(test_dataloader):
-                question = sample["question"][0]
-                question_type = sample["question_type"][0]
-                answer_choice = sample["answer_choice"][0]
-                answer = sample['answer']
+    output_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
+    with open(output_path, mode='w') as outfile:
+        writer = csv.writer(outfile)
+        writer.writerow(["Question Type", "Question", "Answer", "Pred", "accuracy", "bleu", "rouge1", "meteor", "bert_f1"])
+        for sample in tqdm(test_dataloader):
+            question = sample["question"][0]
+            question_type = sample["question_type"][0]
+            answer = sample['answer']
 
-                image = sample["image"].to(device=device)
+            image = sample["image"].to(device=device)
+            input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
 
-                input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
+            with torch.inference_mode():
+                generation = model.generate(images=image, inputs=input_id, max_new_tokens=args.max_new_tokens,
+                                            do_sample=args.do_sample, top_p=args.top_p,
+                                            temperature=args.temperature)
+            generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
 
-                with torch.inference_mode():
-                    generation = model.generate(images=image, inputs=input_id, max_new_tokens=args.max_new_tokens,
-                                                do_sample=args.do_sample, top_p=args.top_p,
-                                                temperature=args.temperature)
-                generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
+            result = dict()
+            decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
 
-                if answer_choice[0] + '.' in generated_texts[0]:
-                    correct = 1
-                else:
-                    correct = 0
+            result["accuracy"] = compute_exact_match(decoded_preds, decoded_labels)
 
-                writer.writerow([question_type, question[0], answer[0], answer_choice[0], generated_texts[0], correct])
-    else:
-        output_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
-        with open(output_path, mode='w') as outfile:
-            writer = csv.writer(outfile)
-            writer.writerow(["Question Type", "Question", "Answer", "Pred", "accuracy", "bleu", "rouge1", "meteor", "bert_f1"])
-            for sample in tqdm(test_dataloader):
-                question = sample["question"][0]
-                question_type = sample["question_type"][0]
-                answer = sample['answer']
+            bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
+            result["bleu"] = bleu_score['bleu']
 
-                image = sample["image"].to(device=device)
-                input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
+            rouge_score = rouge.compute(predictions=decoded_preds, references=decoded_labels, rouge_types=['rouge1'])
+            result["rouge1"] = rouge_score['rouge1']
 
-                with torch.inference_mode():
-                    generation = model.generate(images=image, inputs=input_id, max_new_tokens=args.max_new_tokens,
-                                                do_sample=args.do_sample, top_p=args.top_p,
-                                                temperature=args.temperature)
-                generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
+            meteor_score = meteor.compute(predictions=decoded_preds, references=decoded_labels)
+            result["meteor"] = meteor_score['meteor']
 
-                result = dict()
-                decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
+            bert_score = bertscore.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
+            result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
 
-                result["accuracy"] = compute_exact_match(decoded_preds, decoded_labels)
-
-                bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
-                result["bleu"] = bleu_score['bleu']
-
-                rouge_score = rouge.compute(predictions=decoded_preds, references=decoded_labels, rouge_types=['rouge1'])
-                result["rouge1"] = rouge_score['rouge1']
-
-                meteor_score = meteor.compute(predictions=decoded_preds, references=decoded_labels)
-                result["meteor"] = meteor_score['meteor']
-
-                bert_score = bertscore.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
-                result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
-
-                writer.writerow(
-                    [question_type, question, answer[0], generated_texts[0], result["accuracy"], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
+            writer.writerow(
+                [question_type, question, answer[0], generated_texts[0], result["accuracy"], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
 
 if __name__ == "__main__":
     main()
