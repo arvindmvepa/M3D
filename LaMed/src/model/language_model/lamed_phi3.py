@@ -53,6 +53,7 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
             cache_position: Optional[torch.LongTensor] = None,
+            logits_to_keep=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
         input_ids_pre = input_ids
