@@ -46,9 +46,6 @@ def main():
         answer = values['answer']
         accuracy = values['accuracy']
 
-        if answer == "none":
-            continue
-
         if content_type not in content_scores:
             content_scores[content_type] = {"accuracy": [], "none_count": []}
         content_scores[content_type]["accuracy"].append(accuracy)
@@ -57,7 +54,7 @@ def main():
             label_scores[label_name] = {"accuracy": [], "none_count": []}
         label_scores[label_name]["accuracy"].append(accuracy)
 
-        if answer == "none":
+        if answer.strip().lower() == "none":
             content_scores[content_type]["none_count"].append(1)
             label_scores[label_name]["none_count"].append(1)
         else:
