@@ -15,8 +15,8 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --bf16 True \
     --output_dir $output_dir \
     --num_train_epochs 5 \
-    --per_device_train_batch_size 4 \
-    --per_device_eval_batch_size 4 \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy "steps" \
     --eval_accumulation_steps 1 \
