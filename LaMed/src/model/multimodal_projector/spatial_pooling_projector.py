@@ -11,6 +11,17 @@ class SpatialPoolingProjector(nn.Module):
             image_size = (image_size[0] * 4, image_size[1], image_size[2])
         self.in_dim = in_dim
         self.pooling_size = pooling_size
+        print("image_size: ", image_size)
+        print("patch_size: ", patch_size)
+        print("pooling_size: ", pooling_size)
+        print("in_dim: ", in_dim)
+        print("out_dim: ", out_dim)
+        print("layer_type: ", layer_type)
+        print("layer_num: ", layer_num)
+        print("pooling_type: ", pooling_type)
+        print("pooling_size: ", pooling_size)
+        print("combined_projector: ", combined_projector)
+        print("multimodal: ", multimodal)
 
         self.num_patches_pre = [img // pch for img, pch in zip(image_size, patch_size)]
         self.num_patches_post = [num // pooling_size for num in self.num_patches_pre]
