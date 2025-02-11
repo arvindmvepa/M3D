@@ -21,3 +21,4 @@ torchvision==0.17.1+cu118
 tqdm==4.66.2
 transformers==4.39.1
 tweepy==4.14.0
+bert_score==0.3.13
