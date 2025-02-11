@@ -13,6 +13,8 @@ from LaMed.src.dataset.multi_dataset import VQABratsDataset
 # If the model is not from huggingface but local, please uncomment and import the model architecture.
 # from LaMed.src.model.language_model import *
 import evaluate
+from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
+
 
 bleu = evaluate.load("bleu")
 bertscore = evaluate.load("bertscore")
