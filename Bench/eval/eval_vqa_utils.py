@@ -52,8 +52,8 @@ def main():
 
         if label_name not in label_scores:
             label_scores[label_name] = {"overall": {"accuracy": [], "none_count": []}}
-            if content_type not in label_scores[label_name]:
-                label_scores[label_name][content_type] = {"accuracy": [], "none_count": []}
+        if content_type not in label_scores[label_name]:
+            label_scores[label_name][content_type] = {"accuracy": [], "none_count": []}
         label_scores[label_name]["overall"]["accuracy"].append(accuracy)
         label_scores[label_name][content_type]["accuracy"].append(accuracy)
 
