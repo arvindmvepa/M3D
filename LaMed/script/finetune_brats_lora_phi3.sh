@@ -8,6 +8,7 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --model_type phi3 \
     --multimodal True \
     --combined_projector True \
+    --pretrain_mm_mlp_adapter ./LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
     --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_v2.json \
     --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_v2.json \
     --vqa_data_test_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json \
