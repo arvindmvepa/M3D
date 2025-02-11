@@ -35,6 +35,7 @@ class ModelArguments:
     # projector
     mm_projector_type: Optional[str] = field(default='spp')
     multimodal: bool = field(default=True, metadata={"help": "multimodal"})
+    combined_projector: bool = field(default=False, metadata={"help": "combined_projector"})
     proj_layer_type: str = field(default="mlp", metadata={"help": "Type of projector in Perceiver. options: [linear, mlp]."})
     proj_layer_num: int = field(default=2, metadata={"help": "Number of projectors in Perceiver."})
     proj_pooling_type: str = field(default="spatial", metadata={"help": "Type of pooling in Perceiver. options: [spatial, sequence]."})

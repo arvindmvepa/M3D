@@ -44,6 +44,7 @@ class ModelArguments:
     # projector
     mm_projector_type: Optional[str] = field(default='spp', metadata={"help": "spp"})
     multimodal: bool = field(default=True, metadata={"help": "multimodal"})
+    combined_projector: bool = field(default=False, metadata={"help": "combined_projector"})
     proj_layer_type: str = field(default="mlp", metadata={"help": "Type of layer in projector. options: [linear, mlp]."})
     proj_layer_num: int = field(default=2, metadata={"help": "Number of layers in projector."})
     proj_pooling_type: str = field(default="spatial", metadata={"help": "Type of pooling in projector. options: [spatial, sequence]."})

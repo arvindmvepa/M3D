@@ -7,6 +7,7 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \
     --multimodal True \
+    --combined_projector True \
     --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_v2.json \
     --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_v2.json \
     --vqa_data_test_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json \
