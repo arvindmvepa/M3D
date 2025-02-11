@@ -20,7 +20,7 @@ def main():
         # skip first row
         next(csv_reader)
         for row, sample in tqdm(zip(reader, test_dataset)):
-            accuracy = float(row[4])bug fi
+            accuracy = float(row[4])
             answer = sample['answer']
             q_lang = sample['q_lang']
             qid = sample.get('qid', None)
