@@ -1,6 +1,6 @@
 import csv
 from LaMed.src.dataset.multi_dataset import VQABratsDataset
-from Bench.eval.eval_vqa_utils import parse_args, get_tokenizer
+from Bench.eval.eval_vqa import parse_args, get_tokenizer
 import argparse
 
 
