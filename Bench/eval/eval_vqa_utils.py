@@ -1,5 +1,4 @@
 import csv
-from Bench.eval.eval_vqa import parse_args, get_tokenizer
 import argparse
 import os
 from tqdm import tqdm
@@ -7,14 +6,13 @@ import json
 import numpy as np
 
 
-def main():
-    args = parse_args()
-    with open(args.vqa_data_test_path, 'r') as f:
+def main(vqa_data_test_path, output_dir):
+    with open(vqa_data_test_path, 'r') as f:
         data_list = json.load(f)
     content = []
-    input_eval_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
-    output_eval_path = os.path.join(args.output_dir, "eval_vqa.json")
-    output_eval_summary_path = os.path.join(args.output_dir, "eval_vqa_summary.json")
+    input_eval_path = os.path.join(output_dir, "eval_open_vqa.csv")
+    output_eval_path = os.path.join(output_dir, "eval_vqa.json")
+    output_eval_summary_path = os.path.join(output_dir, "eval_vqa_summary.json")
     with open(input_eval_path, mode='r') as infile:
         reader = csv.reader(infile, delimiter=",")
         # skip first row
@@ -81,4 +79,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    vqa_data_test_path = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json"
+    output_dir = "./LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa"
+    main(vqa_data_test_path=vqa_data_test_path, output_dir=output_dir)
