@@ -103,6 +103,7 @@ def main():
         )
     else:
         raise ValueError(f"Unknown Model Type {model_args.model_type}")
+    print("model: ", model.__class__)
     model = model.to(device=device)
 
     #test_dataset = VQADataset(args, tokenizer=tokenizer, close_ended=args.close_ended, mode='test')
@@ -160,17 +161,17 @@ def main():
                 image = sample["image"].to(device=device)
                 input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
 
-                print(type(model))  # e.g. <class 'transformers.models.xxx.ModelForYYY'>
-                print(model.__class__)
-
                 with torch.inference_mode():
                     generation = model.generate(images=image, inputs=input_id, max_new_tokens=args.max_new_tokens,
                                                 do_sample=args.do_sample, top_p=args.top_p,
                                                 temperature=args.temperature)
                 generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
+                print("generated_texts: ", generated_texts)
 
                 result = dict()
                 decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
+                print("decoded_preds: ", decoded_preds)
+                print("decoded_labels: ", decoded_labels)
                 bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
                 result["bleu"] = bleu_score['bleu']
 
