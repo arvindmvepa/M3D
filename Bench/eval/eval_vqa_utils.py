@@ -55,7 +55,7 @@ def main():
             if content_type not in label_scores[label_name]:
                 label_scores[label_name][content_type] = {"accuracy": [], "none_count": []}
         label_scores[label_name]["overall"]["accuracy"].append(accuracy)
-        label_scores[label_name][content_type].append(accuracy)
+        label_scores[label_name][content_type]["accuracy"].append(accuracy)
 
         if answer.strip().lower() == "none":
             content_scores[content_type]["none_count"].append(1)
