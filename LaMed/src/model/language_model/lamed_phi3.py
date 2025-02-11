@@ -78,7 +78,7 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
                 past_key_values,
                 labels,
                 images,
-                combined_projector=config.combined_projector
+                combined_projector=self.config.combined_projector
             )
 
         try:
