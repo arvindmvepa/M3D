@@ -1,14 +1,36 @@
 import csv
 from LaMed.src.dataset.multi_dataset import VQABratsDataset
+import argparse
 
 
-def main(output_dir):
+def parse_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_name_or_path', type=str, default="GoodBaiBai88/M3D-LaMed-Llama-2-7B")
+    parser.add_argument('--max_length', type=int, default=512)
+    parser.add_argument('--max_new_tokens', type=int, default=256)
+    parser.add_argument('--do_sample', type=bool, default=False)
+    parser.add_argument('--top_p', type=float, default=None)
+    parser.add_argument('--temperature', type=float, default=1.0)
+    parser.add_argument('--device', type=str, default="cuda", choices=["cuda", "cpu"])
+
+    # data
+    parser.add_argument('--data_root', type=str, default="./Data/data")
+    parser.add_argument('--vqa_data_test_path', type=str, default="./Data/data/M3D-VQA/M3D_VQA_test.csv")
+    parser.add_argument('--output_dir', type=str, default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa/")
+
+    parser.add_argument('--proj_out_num', type=int, default=256)
+
+    return parser.parse_args(args)
+
+
+def main():
+    args = parse_args()
     test_dataset = VQABratsDataset(args, tokenizer=tokenizer, mode='test')
 
     content = []
-    input_eval_path = os.path.join(output_dir, "eval_open_vqa.csv")
-    output_eval_path = os.path.join(output_dir, "eval_vqa.json")
-    output_eval_summary_path = os.path.join(output_dir, "eval_vqa_summary.json")
+    input_eval_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
+    output_eval_path = os.path.join(args.output_dir, "eval_vqa.json")
+    output_eval_summary_path = os.path.join(args.output_dir, "eval_vqa_summary.json")
     with open(input_eval_path, mode='r') as infile:
         reader = csv.reader(infile, delimiter=",")
         for row, sample in tqdm(zip(reader, test_dataset)):
@@ -72,5 +94,4 @@ def main(output_dir):
 
 
 if __name__ == "__main__":
-    output_dir = "/local2/amvepa91/M3D/LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa"
-    main(output_dir=output_dir)
+    main()
