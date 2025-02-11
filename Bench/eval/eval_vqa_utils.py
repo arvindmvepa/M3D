@@ -5,6 +5,7 @@ import argparse
 import os
 from tqdm import tqdm
 import json
+import numpy as np
 
 
 def main():
