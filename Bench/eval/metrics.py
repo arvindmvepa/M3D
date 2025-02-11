@@ -59,8 +59,8 @@ def exact_match_score(prediction, ground_truth):
     if not flag:
         if normalize_answer(prediction) == normalize_answer(ground_truth):
             res = 1
-        elif set(normalize_answer(prediction)).issubset(set(normalize_answer(ground_truth))):
-            res = 0.25  # has many correct options
+        #elif set(normalize_answer(prediction)).issubset(set(normalize_answer(ground_truth))):
+        #    res = 0.25  # has many correct options
     else:
         try:
             pre = float(prediction)
@@ -94,8 +94,8 @@ def compute_exact_match(predictions, references):
             exact_match += res
             if res == 1:
                 correct += 1
-            if res == 0.25:
-                half_correct += 1
+            #if res == 0.25:
+            #    half_correct += 1
         print(
             f"There are {correct} correct answers \n [for coursera:] {half_correct} can not select all correct options\n Total: {len(predictions)} questions.")
         return exact_match / len(predictions)
@@ -105,8 +105,8 @@ def compute_exact_match(predictions, references):
         exact_match += res
         if res == 1:
             correct += 1
-        if res == 0.25:
-            half_correct += 1
+        #if res == 0.25:
+        #    half_correct += 1
         return exact_match
     else:
         raise ("The data type is not suit for metric.")

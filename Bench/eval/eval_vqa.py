@@ -152,7 +152,7 @@ def main():
         output_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
         with open(output_path, mode='w') as outfile:
             writer = csv.writer(outfile)
-            writer.writerow(["Question Type", "Question", "Answer", "Pred", "bleu", "rouge1", "meteor", "bert_f1"])
+            writer.writerow(["Question Type", "Question", "Answer", "Pred", "accuracy", "bleu", "rouge1", "meteor", "bert_f1"])
             for sample in tqdm(test_dataloader):
                 question = sample["question"][0]
                 question_type = sample["question_type"][0]
@@ -169,6 +169,9 @@ def main():
 
                 result = dict()
                 decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
+
+                result["accuracy"] = compute_exact_match(decoded_preds, decoded_labels)
+
                 bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
                 result["bleu"] = bleu_score['bleu']
 
@@ -182,7 +185,7 @@ def main():
                 result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
 
                 writer.writerow(
-                    [question_type, question, answer[0], generated_texts[0], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
+                    [question_type, question, answer[0], generated_texts[0], result["accuracy"], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
 
 if __name__ == "__main__":
     main()
