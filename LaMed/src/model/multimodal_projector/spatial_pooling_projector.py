@@ -5,10 +5,18 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 class SpatialPoolingProjector(nn.Module):
-    def __init__(self, image_size, patch_size, in_dim, out_dim, layer_type, layer_num, pooling_type='spatial', pooling_size=2):
+    def __init__(self, image_size, multimodal, patch_size, in_dim, out_dim, layer_type, layer_num, pooling_type='spatial', pooling_size=2):
         super().__init__()
+        if multimodal:
+            image_size = (image_size[0] * 4, image_size[1], image_size[2])
         self.in_dim = in_dim
         self.pooling_size = pooling_size
+
+        print("image_size ", image_size)
+        print("patch_size ", patch_size)
+        print("in_dim ", in_dim)
+        print("out_dim ", out_dim)
+        print("pooling_size ", pooling_size)
 
         self.num_patches_pre = [img // pch for img, pch in zip(image_size, patch_size)]
         self.num_patches_post = [num // pooling_size for num in self.num_patches_pre]
