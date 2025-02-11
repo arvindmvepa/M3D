@@ -3,6 +3,7 @@ from LaMed.src.dataset.multi_dataset import VQABratsDataset
 from Bench.eval.eval_vqa import parse_args, get_tokenizer
 import argparse
 import os
+from tqdm import tqdm
 
 
 def main():
