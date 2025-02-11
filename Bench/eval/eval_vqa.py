@@ -132,6 +132,9 @@ def main():
                 image = sample["image"].to(device=device)
                 input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
 
+                print(type(model))  # e.g. <class 'transformers.models.xxx.ModelForYYY'>
+                print(model.__class__)
+
                 with torch.inference_mode():
                     generation = model.generate(images=image, inputs=input_id, max_new_tokens=args.max_new_tokens,
                                                 do_sample=args.do_sample, top_p=args.top_p,
