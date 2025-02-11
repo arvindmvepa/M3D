@@ -91,11 +91,11 @@ def main():
         trust_remote_code=True
     )
     """
-    if 'llama' in args.model_name_or_path:
+    if 'llama' in args.model_name_or_path.lower():
         model = LamedLlamaForCausalLM.from_pretrained(
             args.model_name_or_path,
         )
-    elif 'phi3' in args.model_name_or_path:
+    elif 'phi3' in args.model_name_or_path.lower():
         model = LamedPhi3ForCausalLM.from_pretrained(
             args.model_name_or_path,
         )
