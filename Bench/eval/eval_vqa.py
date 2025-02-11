@@ -56,6 +56,26 @@ def postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]
     labels = [[label.strip()] for label in labels]
     return preds, labels
+
+
+def get_tokenizer(model_path):
+    # Load tokenizer from the given path with specified configurations
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        padding_side="right",
+        use_fast=False,
+    )
+
+    # Define and add special tokens
+    special_token = {"additional_special_tokens": ["<im_patch>", "<bx_start>", "<bx_end>"]}
+    tokenizer.add_special_tokens(
+        special_token
+    )
+    tokenizer.add_tokens("[SEG]")
+
+    if tokenizer.unk_token is not None and tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.unk_token
+    return tokenizer
         
           
 def main():
@@ -63,18 +83,24 @@ def main():
     args = parse_args()
     device = torch.device(args.device)
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.model_name_or_path,
-        model_max_length=args.max_length,
-        padding_side="right",
-        use_fast=False,
-        trust_remote_code=True
-    )
+    tokenizer = get_tokenizer(args.model_name_or_path)
+    """
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         device_map='auto',
         trust_remote_code=True
     )
+    """
+    if 'llama' in args.model_name_or_path:
+        model = LamedLlamaForCausalLM.from_pretrained(
+            args.model_name_or_path,
+        )
+    elif 'phi3' in args.model_name_or_path:
+        model = LamedPhi3ForCausalLM.from_pretrained(
+            args.model_name_or_path,
+        )
+    else:
+        raise ValueError(f"Unknown Model Type {model_args.model_type}")
     model = model.to(device=device)
 
     #test_dataset = VQADataset(args, tokenizer=tokenizer, close_ended=args.close_ended, mode='test')
