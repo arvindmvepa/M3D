@@ -125,7 +125,11 @@ class LamedMetaForCausalLM(ABC):
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
         else:
-            image_features = self.encode_images(images)
+            image_features = []
+            for index in range(4):
+                image_features_ = self.encode_images(images[:, index])
+                image_features.append(image_features_)
+            image_features = torch.cat(image_features, dim=1)
             inputs_embeds = self.get_model().embed_tokens(input_ids)
             inputs_embeds = torch.cat(
                 (inputs_embeds[:, :1, :], image_features, inputs_embeds[:, (image_features.shape[1] + 1):, :]), dim=1)

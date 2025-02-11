@@ -31,8 +31,7 @@ class ModelArguments:
 
     # image
     image_channel: int = field(default=1)
-    #image_size: tuple = field(default=(32, 256, 256))
-    image_size: tuple = field(default=(128, 256, 256))
+    image_size: tuple = field(default=(32, 256, 256))
     patch_size: tuple = field(default=(4, 16, 16))
 
     # vision

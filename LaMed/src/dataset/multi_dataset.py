@@ -378,10 +378,10 @@ class VQABratsDataset(VQADataset):
         for modality in ["t1c", "t1n", "t2f", "t2w"]:
             image_abs_path = data["volume_non_seg_files"][modality]
             new_image_abs_path = self.convert_file_path_to_npy(image_abs_path)
-            image.append(np.load(new_image_abs_path))
-        image = np.concatenate(image, axis=0)
-
-        image = self.transform(image)
+            image_ = np.load(new_image_abs_path)
+            image_ = self.transform(image_)
+            image.append(image_)
+        image = torch.stack(image, axis=0)
 
         question = data["question"]
         answer = str(data["answer"])
