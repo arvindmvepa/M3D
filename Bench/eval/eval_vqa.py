@@ -130,7 +130,7 @@ def main():
                 question = sample["question"][0]
                 question_type = sample["question_type"][0]
                 answer_choice = sample["answer_choice"][0]
-                answer = sample['answer'][0]
+                answer = sample['answer']
 
                 image = sample["image"].to(device=device)
 
@@ -156,7 +156,7 @@ def main():
             for sample in tqdm(test_dataloader):
                 question = sample["question"][0]
                 question_type = sample["question_type"][0]
-                answer = sample['answer'][0]
+                answer = sample['answer']
 
                 image = sample["image"].to(device=device)
                 input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
@@ -166,12 +166,9 @@ def main():
                                                 do_sample=args.do_sample, top_p=args.top_p,
                                                 temperature=args.temperature)
                 generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
-                print("generated_texts: ", generated_texts)
 
                 result = dict()
                 decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
-                print("decoded_preds: ", decoded_preds)
-                print("decoded_labels: ", decoded_labels)
                 bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
                 result["bleu"] = bleu_score['bleu']
 
