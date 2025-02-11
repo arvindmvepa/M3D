@@ -18,7 +18,7 @@ def main():
     with open(input_eval_path, mode='r') as infile:
         reader = csv.reader(infile, delimiter=",")
         # skip first row
-        next(csv_reader)
+        next(reader)
         for row, sample in tqdm(zip(reader, test_dataset)):
             accuracy = float(row[4])
             answer = sample['answer']
