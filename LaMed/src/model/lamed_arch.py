@@ -48,6 +48,7 @@ class LamedMetaModel:
         self.config.vision_select_feature = model_args.vision_select_feature
 
         self.config.mm_projector_type = model_args.mm_projector_type
+        self.config.multimodal = model_args.multimodal
         self.config.proj_layer_type = model_args.proj_layer_type
         self.config.proj_layer_num = model_args.proj_layer_num
         self.config.proj_pooling_type = model_args.proj_pooling_type
