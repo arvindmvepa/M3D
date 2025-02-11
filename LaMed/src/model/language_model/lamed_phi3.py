@@ -15,6 +15,10 @@ from ..lamed_arch import LamedMetaModel, LamedMetaForCausalLM
 class LamedPhi3Config(Phi3Config):
     model_type = "lamed_phi3"
 
+    def __init__(self, multimodal=False, **kwargs):
+        super().__init__(**kwargs)
+        self.multimodal = multimodal
+
 
 class LamedPhi3Model(LamedMetaModel, Phi3Model):
     config_class = LamedPhi3Config
