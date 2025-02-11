@@ -66,10 +66,10 @@ def main():
 
     for content_type in content_scores.keys():
         content_scores[content_type]["accuracy"] = np.mean(content_scores[content_type]["accuracy"])
-        content_scores[content_type]["none_count"] = np.sum(content_scores[content_type]["none_count"])
+        content_scores[content_type]["none_count"] = np.mean(content_scores[content_type]["none_count"])
     for label_name in label_scores.keys():
         label_scores[label_name]["accuracy"] = np.mean(label_scores[label_name]["accuracy"])
-        label_scores[label_name]["none_count"] = np.sum(label_scores[label_name]["none_count"])
+        label_scores[label_name]["none_count"] = np.mean(label_scores[label_name]["none_count"])
 
     summary['content_scores'] = content_scores
     summary['label_scores'] = label_scores
