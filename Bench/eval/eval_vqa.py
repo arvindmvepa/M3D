@@ -44,7 +44,7 @@ def parse_args(args=None):
     # data
     parser.add_argument('--data_root', type=str, default="./Data/data")
     parser.add_argument('--vqa_data_test_path', type=str, default="./Data/data/M3D-VQA/M3D_VQA_test.csv")
-    parser.add_argument('--close_ended', type=bool, default=True)
+    parser.add_argument('--close_ended', type=bool, default=False)
     parser.add_argument('--output_dir', type=str, default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa/")
 
     parser.add_argument('--proj_out_num', type=int, default=256)
@@ -98,10 +98,10 @@ def main():
             writer = csv.writer(outfile)
             writer.writerow(["Question Type", "Question", "Answer", "Answer Choice", "Pred", "Correct"])
             for sample in tqdm(test_dataloader):
-                question = sample["question"]
-                question_type = sample["question_type"].item()
-                answer_choice = sample["answer_choice"]
-                answer = sample['answer']
+                question = sample["question"][0]
+                answer_type = sample["answer_type"][0]
+                answer_choice = sample["answer_choice"][0]
+                answer = sample['answer'][0]
 
                 image = sample["image"].to(device=device)
 
@@ -118,16 +118,16 @@ def main():
                 else:
                     correct = 0
 
-                writer.writerow([question_type, question[0], answer[0], answer_choice[0], generated_texts[0], correct])
+                writer.writerow([answer_type, question[0], answer[0], answer_choice[0], generated_texts[0], correct])
     else:
         output_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
         with open(output_path, mode='w') as outfile:
             writer = csv.writer(outfile)
             writer.writerow(["Question Type", "Question", "Answer", "Pred", "bleu", "rouge1", "meteor", "bert_f1"])
             for sample in tqdm(test_dataloader):
-                question = sample["question"]
-                question_type = sample["question_type"].item()
-                answer = sample['answer']
+                question = sample["question"][0]
+                answer_type = sample["answer_type"][0]
+                answer = sample['answer'][0]
 
                 image = sample["image"].to(device=device)
                 input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
@@ -153,7 +153,7 @@ def main():
                 result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
 
                 writer.writerow(
-                    [question_type, question[0], answer[0], generated_texts[0], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
+                    [answer_type, question[0], answer[0], generated_texts[0], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
 
 if __name__ == "__main__":
     main()
