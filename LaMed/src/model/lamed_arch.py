@@ -118,6 +118,7 @@ class LamedMetaForCausalLM(ABC):
             image_features_ = self.get_model().get_vision_tower()(images[:, index])
             image_features.append(image_features_)
         image_features = torch.cat(image_features, dim=1)
+        print("image_features ", image_features.shape)
         image_features = self.get_model().mm_projector(image_features)
         return image_features
 
