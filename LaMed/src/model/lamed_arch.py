@@ -128,7 +128,6 @@ class LamedMetaForCausalLM(ABC):
                 image_features.append(image_features_)
             image_features = torch.cat(image_features, dim=1)
             image_features = self.get_model().mm_projector(image_features)
-        print(image_features.shape)
         return image_features
 
     def prepare_inputs_for_multimodal(
