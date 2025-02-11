@@ -4,13 +4,13 @@ from Bench.eval.eval_vqa import parse_args, get_tokenizer
 import argparse
 import os
 from tqdm import tqdm
+import json
 
 
 def main():
     args = parse_args()
-    tokenizer = get_tokenizer(args.model_name_or_path)
-    test_dataset = VQABratsDataset(args, tokenizer=tokenizer, mode='test')
-
+    with open(args.vqa_data_test_path, 'r') as f:
+        data_list = json.load(f)
     content = []
     input_eval_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
     output_eval_path = os.path.join(args.output_dir, "eval_vqa.json")
@@ -19,7 +19,7 @@ def main():
         reader = csv.reader(infile, delimiter=",")
         # skip first row
         next(reader)
-        for row, sample in tqdm(zip(reader, test_dataset)):
+        for row, sample in tqdm(zip(reader, data_list)):
             accuracy = float(row[4])
             answer = sample['answer']
             q_lang = sample['q_lang']
