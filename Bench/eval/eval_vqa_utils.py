@@ -5,6 +5,7 @@ import argparse
 
 
 def main():
+    args = parse_args()
     tokenizer = get_tokenizer(args.model_name_or_path)
     test_dataset = VQABratsDataset(args, tokenizer=tokenizer, mode='test')
 
