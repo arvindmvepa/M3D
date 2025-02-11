@@ -214,7 +214,6 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
 
             return output_ids, logits
         else:
-            print("kwargs: ", kwargs)
             output_ids = super().generate(
                 inputs_embeds=inputs_embeds,
                 **kwargs
