@@ -96,8 +96,8 @@ def compute_exact_match(predictions, references):
                 correct += 1
             #if res == 0.25:
             #    half_correct += 1
-        print(
-            f"There are {correct} correct answers \n [for coursera:] {half_correct} can not select all correct options\n Total: {len(predictions)} questions.")
+        #print(
+        #    f"There are {correct} correct answers \n [for coursera:] {half_correct} can not select all correct options\n Total: {len(predictions)} questions.")
         return exact_match / len(predictions)
 
     elif type(references) == str:
