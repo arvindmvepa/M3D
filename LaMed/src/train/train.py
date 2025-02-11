@@ -88,7 +88,7 @@ class TrainingArguments(transformers.TrainingArguments):
     cache_dir: Optional[str] = field(default=None)
     remove_unused_columns: bool = field(default=False)
     model_max_length: int = field(
-        default=512, #512
+        default=1280, #512
         metadata={
             "help":
             "Maximum sequence length. Sequences will be right padded (and possibly truncated)."
