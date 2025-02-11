@@ -31,9 +31,8 @@ def main():
             content_type = sample.get('content_type', None)
             label_name = sample.get('label_name', None)
             content.append({'volume_file_id': volume_file_id, 'volume_file_dir': volume_file_dir, "accuracy": accuracy,
-                            'study_name': study_name, 'question': question_text, 'question_clean': question_clean,
-                            'answer': answer, 'q_lang': q_lang, 'content_type': content_type, 'label_name': label_name,
-                            "qid": qid})
+                            'study_name': study_name,'question_clean': question_clean, 'answer': answer,
+                            'q_lang': q_lang, 'content_type': content_type, 'label_name': label_name, "qid": qid})
     with open(output_eval_path, 'w') as f:
         json.dump(content, f, indent=4)
 
