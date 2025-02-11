@@ -2,13 +2,13 @@ import csv
 from LaMed.src.dataset.multi_dataset import VQABratsDataset
 
 
-def main():
+def main(output_dir):
     test_dataset = VQABratsDataset(args, tokenizer=tokenizer, mode='test')
 
     content = []
-    input_eval_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
-    output_eval_path = os.path.join(args.output_dir, "eval_vqa.json")
-    output_eval_summary_path = os.path.join(args.output_dir, "eval_vqa_summary.json")
+    input_eval_path = os.path.join(output_dir, "eval_open_vqa.csv")
+    output_eval_path = os.path.join(output_dir, "eval_vqa.json")
+    output_eval_summary_path = os.path.join(output_dir, "eval_vqa_summary.json")
     with open(input_eval_path, mode='r') as infile:
         reader = csv.reader(infile, delimiter=",")
         for row, sample in tqdm(zip(reader, test_dataset)):
@@ -72,4 +72,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    output_dir = "/local2/amvepa91/M3D/LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa"
+    main(output_dir=output_dir)
