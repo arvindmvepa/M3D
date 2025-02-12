@@ -233,12 +233,20 @@ class VisionMultiLabelClassifier(nn.Module):
         self.classifier = nn.Linear(hidden_dim, num_labels)
 
     def forward(self, mod1, mod2, mod3, mod4, labels=None):
+        print("mods")
+        print(mod1.shape, mod2.shape, mod3.shape, mod4.shape)
         feats1 = self.vision_tower(mod1)
         feats2 = self.vision_tower(mod2)
         feats3 = self.vision_tower(mod3)
         feats4 = self.vision_tower(mod4)
+        print("features 1")
+        print(feats1.shape, feats1.shape, feats1.shape, feats1.shape)
         feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)
+        print("features 2")
+        print(feats.shape)
         logits = self.classifier(feats)
+        print("logits")
+        print(logits.shape)
 
         if labels is not None:
             # For multi-label classification, we typically use BCEWithLogitsLoss
