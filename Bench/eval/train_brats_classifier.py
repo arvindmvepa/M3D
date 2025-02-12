@@ -275,6 +275,7 @@ def main():
         raise ValueError(f"Unknown model_type {args.model_type}. Supported: ['llama2', 'phi3']")
 
     vision_tower = base_model.get_model().get_vision_tower()
+    vision_tower.select_feature = "cls_patch"
     if vision_tower is None:
         raise ValueError(
             "No vision tower found in the loaded model. Ensure `vision_tower` is correctly specified."

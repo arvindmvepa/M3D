@@ -157,7 +157,7 @@ class ViT3DTower(nn.Module):
         if self.select_feature == 'patch':
             image_features = image_features[:, 1:]
         elif self.select_feature == 'cls_patch':
-            image_features = image_features
+            image_features = image_features[:, 0]
         else:
             raise ValueError(f'Unexpected select feature: {self.select_feature}')
 
