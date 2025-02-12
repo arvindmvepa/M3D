@@ -256,6 +256,7 @@ def main():
         log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}.log",
         log_to_console=True
     )
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}"
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
@@ -310,8 +311,8 @@ def main():
     # 4) Training Loop
     # --------------------------------------------------------------------
     best_val_loss = float('inf')
-    best_model_path = os.path.join(args.output_dir, "best_model.pt")
-    os.makedirs(args.output_dir, exist_ok=True)
+    best_model_path = os.path.join(output_dir, "best_model.pt")
+    os.makedirs(output_dir, exist_ok=True)
     """
     logger.info(f"Starting training for {args.num_epochs} epochs, LR={args.learning_rate}")
     for epoch in range(args.num_epochs):
@@ -427,7 +428,7 @@ def main():
     # Log final metrics
     logger.info("========== TEST METRICS ==========")
     for i in range(num_labels):
-        logger.info(f"Label {i} '{test_dataset.label2id[i]}' => "
+        logger.info(f"Label {i} '{test_dataset.specified_labels[i]}' => "
                     f"AUC={label_aucs[i]:.4f} | ACC={label_accs[i]:.4f}")
     logger.info(f"Test Macro AUC = {macro_auc:.4f}")
     logger.info(f"Test Macro Accuracy = {macro_acc:.4f}")
