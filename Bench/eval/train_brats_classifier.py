@@ -9,7 +9,6 @@ from transformers import HfArgumentParser
 from dataclasses import dataclass, field
 
 import monai.transforms as mtf
-from monai.data.utils import set_track_meta
 
 # --- Import your original modules ---
 # You will need to have your environment set so LaMed/src is visible in the path
@@ -100,7 +99,6 @@ class MultiLabelVisionDataset(Dataset):
         val_transform = mtf.Compose([
             mtf.ToTensor(dtype=torch.float),
         ])
-        set_track_meta(False)
 
         if mode == "train":
             self.transform = train_transform
