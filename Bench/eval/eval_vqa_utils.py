@@ -87,11 +87,12 @@ def main(vqa_data_test_path, output_dir):
             pred_counter = Counter(most_common_preds[label_name][content_type])
             most_common_answer, answer_count = answer_counter.most_common(1)[0]
             most_common_pred, pred_count = pred_counter.most_common(1)[0]
+            total_count = sum(answer_counter.values())
             label_scores[label_name][content_type]["most_common_answer"] = most_common_answer
-            label_scores[label_name][content_type]["most_common_answer_count"] = answer_count
+            label_scores[label_name][content_type]["most_common_answer_count"] = answer_count/total_count
             label_scores[label_name][content_type]["most_common_pred"] = most_common_pred
-            label_scores[label_name][content_type]["most_common_pred_count"] = pred_count
-            label_scores[label_name][content_type]['count'] = sum(answer_counter.values())
+            label_scores[label_name][content_type]["most_common_pred_count"] = pred_count/total_count
+            label_scores[label_name][content_type]['count'] = total_count
 
     summary['content_scores'] = content_scores
     summary['label_scores'] = label_scores
