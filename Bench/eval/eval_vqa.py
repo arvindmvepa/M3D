@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 import argparse
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
-from Bench.dataset.multi_dataset import VQADataset
 from Bench.eval.metrics import compute_exact_match, qa_f1_score
 from LaMed.src.dataset.multi_dataset import VQABratsDataset
 # If the model is not from huggingface but local, please uncomment and import the model architecture.
@@ -131,6 +130,13 @@ def main():
 
             image = sample["image"].to(device=device)
             input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
+
+            print("question: ", question)
+            print("answer: ", answer)
+            print("question_type: ", question_type)
+            print("image.shape: ", image.shape)
+            print("input_id.shape: ", input_id.shape)
+
 
             with torch.inference_mode():
                 generation = model.generate(images=image, inputs=input_id, max_new_tokens=args.max_new_tokens,
