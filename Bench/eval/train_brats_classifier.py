@@ -213,35 +213,23 @@ class MultiLabelVisionDataset(Dataset):
 # Vision classifier that wraps the vision tower + a custom classifier head
 # ------------------------------------------------------------------------
 class VisionMultiLabelClassifier(nn.Module):
-    def __init__(self, vision_tower: nn.Module, num_labels: int):
+    def __init__(self, vision_tower: nn.Module, num_labels: int, num_modalities=4):
         """
         :param vision_tower: The extracted vision model (e.g. `model.get_model().vision_tower`).
         :param num_labels: Number of labels for multi-label classification.
         """
         super().__init__()
         self.vision_tower = vision_tower
-
-        # Inspect the dimension of the output from the vision tower.
-        # Suppose we get a feature vector of dimension 'hidden_dim'.
-        # If uncertain, print out shapes in a debug run or check the tower definition.
-        hidden_dim = 768  # or whatever your vision model produces
+        hidden_dim = 768 * num_modalities
         self.classifier = nn.Linear(hidden_dim, num_labels)
 
     def forward(self, mod1, mod2, mod3, mod4, labels=None):
-        print("mods")
-        print(mod1.shape, mod2.shape, mod3.shape, mod4.shape)
         feats1 = self.vision_tower.forward(mod1)
         feats2 = self.vision_tower.forward(mod2)
         feats3 = self.vision_tower.forward(mod3)
         feats4 = self.vision_tower.forward(mod4)
-        print("features 1")
-        print(feats1.shape, feats1.shape, feats1.shape, feats1.shape)
         feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)
-        print("features 2")
-        print(feats.shape)
         logits = self.classifier(feats)
-        print("logits")
-        print(logits.shape)
 
         if labels is not None:
             # For multi-label classification, we typically use BCEWithLogitsLoss
