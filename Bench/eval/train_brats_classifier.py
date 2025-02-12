@@ -68,7 +68,7 @@ class MultiLabelVisionDataset(Dataset):
       6) Returns {'image': Tensor, 'labels': multi-hot Tensor}.
     """
 
-    def __init__(self, args, mode="train"):
+    def __init__(self, data_file, mode="train"):
         """
         :param args:  Typically your DataArguments or config with fields:
                       - vqa_data_train_path / val_path / test_path
@@ -76,7 +76,6 @@ class MultiLabelVisionDataset(Dataset):
         :param mode:  'train', 'validation', or 'test'
         """
         super().__init__()
-        self.args = args
         self.mode = mode
 
         # ------------------------------------------------------
@@ -97,15 +96,13 @@ class MultiLabelVisionDataset(Dataset):
 
         if mode == "train":
             self.transform = train_transform
-            self.data_file = args.vqa_data_train_path
         elif mode == "validation":
             self.transform = val_transform
-            self.data_file = args.vqa_data_val_path
         elif "test" in mode:
             self.transform = val_transform
-            self.data_file = args.vqa_data_test_path
         else:
             raise ValueError(f"Unknown mode {mode}.")
+        self.data_file = data_file
 
         # Read & group JSON data so each volume_file_dir has:
         #   1) volume_non_seg_files: { "t1c":..., "t1n":..., "t2f":..., "t2w":... }
@@ -259,6 +256,9 @@ def main():
     (args,) = parser.parse_args_into_dataclasses()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    train_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_v2.json"
+    val_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_v2.json"
+    test_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json"
 
     # --------------------------------------------------------------------
     # 1) Load the pre-trained MLLM with a vision tower
@@ -286,9 +286,9 @@ def main():
     model = VisionMultiLabelClassifier(vision_tower=vision_tower, num_labels=args.num_labels).to(device)
 
 
-    train_dataset = MultiLabelVisionDataset(args, mode="train")
-    val_dataset = MultiLabelVisionDataset(args, mode="validation")
-    test_dataset = MultiLabelVisionDataset(args, mode="test")
+    train_dataset = MultiLabelVisionDataset(data_file=train_file, mode="train")
+    val_dataset = MultiLabelVisionDataset(data_file=val_file, mode="validation")
+    test_dataset = MultiLabelVisionDataset(data_file=test_file, mode="test")
 
     train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
