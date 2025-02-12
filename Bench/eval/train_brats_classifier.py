@@ -59,6 +59,7 @@ class VisionTrainingArguments:
         default="vit3d",
         metadata={"help": "Whether we have a vision tower in the loaded model (e.g. 'vit3d')."}
     )
+    pretrain_vision_model: str = field(default=None, metadata={"help": "Path to pretrained model for ViT."})
     pretrain_mllm: str = field(
         default=None,
         metadata={"help": "Path to a pretrained MLLM weights to load into the model (optional)."}
@@ -258,10 +259,10 @@ def main():
     (args,) = parser.parse_args_into_dataclasses()
     version = "v2"
     logger = setup_logger(
-        log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_{version}.log",
+        log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_pretrained_vision_tower_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_{version}.log",
         log_to_console=True
     )
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_{version}"
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_pretrained_vision_tower_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_{version}"
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
@@ -281,6 +282,9 @@ def main():
         raise ValueError(f"Unknown model_type {args.model_type}. Supported: ['llama2', 'phi3']")
 
     vision_tower = base_model.get_model().get_vision_tower()
+    if args.pretrain_vision_model is not None:
+        vision_tower.load_state_dict(torch.load(args.pretrain_vision_model))
+        logger.info(f"Loaded vision tower from {args.pretrain_vision_model}")
     vision_tower.select_feature = "cls_patch"
     if vision_tower is None:
         raise ValueError("No vision tower found in the loaded model. Check `vision_tower` args.")
