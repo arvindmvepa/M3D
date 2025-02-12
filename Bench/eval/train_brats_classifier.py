@@ -283,7 +283,10 @@ def main():
 
     vision_tower = base_model.get_model().get_vision_tower()
     if args.pretrain_vision_model is not None:
-        vision_tower.load_state_dict(torch.load(args.pretrain_vision_model))
+        state_dict = torch.load(args.pretrain_vision_model)
+        # add vision_tower to the state_dict
+        updated_state_dict = {"vision_tower." + k: v for k, v in state_dict.items()}
+        vision_tower.load_state_dict(updated_state_dict)
         logger.info(f"Loaded vision tower from {args.pretrain_vision_model}")
     vision_tower.select_feature = "cls_patch"
     if vision_tower is None:
