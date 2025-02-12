@@ -5,6 +5,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
 import json
+import logging
+from tqdm import tqdm
 
 from transformers import HfArgumentParser
 from dataclasses import dataclass, field
@@ -12,6 +14,33 @@ from dataclasses import dataclass, field
 import monai.transforms as mtf
 
 from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
+
+
+def setup_logger(log_file="training.log", log_to_console=True):
+    """
+    Sets up a logger to write INFO-level messages to a file
+    and optionally to the console.
+    """
+    logger = logging.getLogger("training_logger")
+    logger.setLevel(logging.INFO)
+    logger.handlers = []  # Clear any existing handlers (useful in notebooks)
+
+    # File handler (always)
+    fh = logging.FileHandler(log_file, mode="w")
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+
+    # Optional console handler
+    if log_to_console:
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+
+    return logger
+
 
 
 @dataclass
@@ -244,6 +273,8 @@ class VisionMultiLabelClassifier(nn.Module):
 # Main training script
 # ------------------------------------------------------------------------
 def main():
+    logger = setup_logger(log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_toward_{args.freeze_vision_tower}_num_epochs_{args.num_epochs}_training.log", log_to_console=True)
+
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
@@ -268,13 +299,13 @@ def main():
         raise ValueError(
             "No vision tower found in the loaded model. Ensure `vision_tower` is correctly specified."
         )
-    print(f"Loaded vision tower")
-
     # Optionally freeze the entire vision tower
     if args.freeze_vision_tower:
         for param in vision_tower.parameters():
             param.requires_grad = False
-        print("Vision tower is frozen.")
+
+    logger.info(f"Created vision tower from {args.model_name_or_path} with frozen_vision_tower={args.freeze_vision_tower}")
+
 
     # Create our classification model
     model = VisionMultiLabelClassifier(vision_tower=vision_tower, num_labels=args.num_labels).to(device)
@@ -283,6 +314,9 @@ def main():
     train_dataset = MultiLabelVisionDataset(data_file=train_file, mode="train")
     val_dataset = MultiLabelVisionDataset(data_file=val_file, mode="validation")
     test_dataset = MultiLabelVisionDataset(data_file=test_file, mode="test")
+
+    logger.info(f"Dataset sizes: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
+
 
     train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
@@ -301,9 +335,10 @@ def main():
     best_val_loss = float('inf')
     model.train()
 
+    logger.info(f"Starting training for {args.num_epochs} epochs, LR={args.learning_rate}")
     for epoch in range(args.num_epochs):
         total_loss = 0.0
-        for sample in train_loader:
+        for sample in tqdm(train_loader):
             mod1 = sample["t1c"].to(device)
             mod2 = sample["t1n"].to(device)
             mod3 = sample["t2f"].to(device)
@@ -318,7 +353,7 @@ def main():
             total_loss += loss.item()
 
         avg_train_loss = total_loss / len(train_loader)
-        print(f"Epoch [{epoch + 1}/{args.num_epochs}] - Train Loss: {avg_train_loss:.4f}")
+        logger.info(f"Epoch [{epoch + 1}/{args.num_epochs}] - Train Loss: {avg_train_loss:.4f}")
 
         # ------------------------------
         #  Validation
@@ -326,7 +361,7 @@ def main():
         val_loss = 0.0
         model.eval()
         with torch.no_grad():
-            for sample in val_loader:
+            for sample in tqdm(val_loader):
                 mod1 = sample["t1c"].to(device)
                 mod2 = sample["t1n"].to(device)
                 mod3 = sample["t2f"].to(device)
@@ -336,7 +371,7 @@ def main():
                 val_loss += loss.item()
 
         val_loss /= len(val_loader)
-        print(f"Epoch [{epoch + 1}/{args.num_epochs}] - Validation Loss: {val_loss:.4f}")
+        logger.info(f"Epoch [{epoch + 1}/{args.num_epochs}] - Validation Loss: {val_loss:.4f}")
         model.train()
 
         # Save best model
@@ -345,9 +380,9 @@ def main():
             os.makedirs(args.output_dir, exist_ok=True)
             checkpoint_path = os.path.join(args.output_dir, "best_model.pt")
             torch.save(model.state_dict(), checkpoint_path)
-            print(f"New best val loss. Model saved to {checkpoint_path}")
+            logger.info(f"New best val loss. Model saved to {checkpoint_path}")
 
-    print("Training complete.")
+    logger.info("Training complete.")
 
 
 if __name__ == "__main__":
