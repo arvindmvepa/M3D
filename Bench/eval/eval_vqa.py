@@ -143,17 +143,29 @@ def main():
 
             result["accuracy"] = compute_exact_match(decoded_preds, decoded_labels)
 
-            bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
+            try:
+                bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
+            except:
+                bleu_score = {'bleu': np.nan}
             result["bleu"] = bleu_score['bleu']
 
-            rouge_score = rouge.compute(predictions=decoded_preds, references=decoded_labels, rouge_types=['rouge1'])
+            try:
+                rouge_score = rouge.compute(predictions=decoded_preds, references=decoded_labels, rouge_types=['rouge1'])
+            except:
+                rouge_score = {'rouge1': np.nan}
             result["rouge1"] = rouge_score['rouge1']
 
-            meteor_score = meteor.compute(predictions=decoded_preds, references=decoded_labels)
+            try:
+                meteor_score = meteor.compute(predictions=decoded_preds, references=decoded_labels)
+            except:
+                meteor_score = {'meteor': np.nan}
             result["meteor"] = meteor_score['meteor']
 
-            bert_score = bertscore.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
-            result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
+            try:
+                bert_score = bertscore.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
+                result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
+            except:
+                result["bert_f1"] = np.nan
 
             writer.writerow(
                 [question_type, question, answer[0], generated_texts[0], result["accuracy"], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
