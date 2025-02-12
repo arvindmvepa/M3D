@@ -273,10 +273,10 @@ class VisionMultiLabelClassifier(nn.Module):
 # Main training script
 # ------------------------------------------------------------------------
 def main():
-    logger = setup_logger(log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_toward_{args.freeze_vision_tower}_num_epochs_{args.num_epochs}_training.log", log_to_console=True)
-
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
+    logger = setup_logger(log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_toward_{args.freeze_vision_tower}_num_epochs_{args.num_epochs}_training.log", log_to_console=True)
+
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     train_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_v2.json"
@@ -318,7 +318,7 @@ def main():
     logger.info(f"Dataset sizes: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
 
 
-    train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
