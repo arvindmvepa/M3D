@@ -9,6 +9,9 @@ import json
 import logging
 from tqdm import tqdm
 
+# Add sklearn for metrics
+from sklearn.metrics import roc_auc_score, accuracy_score
+
 from transformers import HfArgumentParser
 from dataclasses import dataclass, field
 
@@ -18,15 +21,11 @@ from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCa
 
 
 def setup_logger(log_file="training.log", log_to_console=True):
-    """
-    Sets up a logger to write INFO-level messages to a file
-    and optionally to the console.
-    """
     logger = logging.getLogger("training_logger")
     logger.setLevel(logging.INFO)
-    logger.handlers = []  # Clear any existing handlers (useful in notebooks)
+    logger.handlers = []  # Clear existing handlers
 
-    # File handler (always)
+    # File handler
     fh = logging.FileHandler(log_file, mode="w")
     fh.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -41,7 +40,6 @@ def setup_logger(log_file="training.log", log_to_console=True):
         logger.addHandler(ch)
 
     return logger
-
 
 
 @dataclass
@@ -107,8 +105,7 @@ class MultiLabelVisionDataset(Dataset):
         self.mode = mode
 
         # ------------------------------------------------------
-        # 1) Define *exactly five* labels that you care about
-        #    (Edit to match your real label names)
+        # 1) Define exactly five labels that you care about
         # ------------------------------------------------------
         self.specified_labels = [
             "Non-Enhancing Tumor",
@@ -117,8 +114,7 @@ class MultiLabelVisionDataset(Dataset):
             "Resection Cavity",
             "Tumor Core"
         ]
-        # Map each label to an index: 0..4
-        self.label2id = {lbl: i for i, lbl in enumerate(self.specified_labels)}
+        self.label2id = {lbl.lower(): i for i, lbl in enumerate(self.specified_labels)}
         self.num_labels = len(self.specified_labels)  # 5
 
         # ------------------------------------------------------
@@ -156,7 +152,7 @@ class MultiLabelVisionDataset(Dataset):
             self.samples.append({
                 "volume_file_dir": vol_dir,
                 "volume_non_seg_files": vol_info["volume_non_seg_files"],
-                "label_vec": vol_info["label_vec"],  # already a 5-dim multi-hot
+                "label_vec": vol_info["label_vec"],  # 5-dim multi-hot
             })
 
     def _read_and_group_data(self, json_path):
@@ -176,7 +172,6 @@ class MultiLabelVisionDataset(Dataset):
             if vol_dir not in grouped:
                 grouped[vol_dir] = {
                     "volume_non_seg_files": entry["volume_non_seg_files"],
-                    # Start with a zero-vector for the 5 labels
                     "label_vec": torch.zeros(self.num_labels, dtype=torch.float),
                 }
 
@@ -185,7 +180,6 @@ class MultiLabelVisionDataset(Dataset):
                 label = entry.get("label_name", "").strip().lower()
                 answer_str = str(entry.get("answer", "None")).strip().lower()
 
-                # If this label is in our specified set & answer != "none", mark it present
                 if label in self.label2id and answer_str != "none":
                     idx = self.label2id[label]
                     grouped[vol_dir]["label_vec"][idx] = 1.0
@@ -196,17 +190,6 @@ class MultiLabelVisionDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        """
-        Returns a dictionary:
-          {
-            "t1c":  Tensor [C, D, H, W],
-            "t1n":  Tensor [...],
-            "t2f":  Tensor [...],
-            "t2w":  Tensor [...],
-            "labels": FloatTensor [5], (multi-hot for each of the five labels)
-            "volume_file_dir": str
-          }
-        """
         sample = self.samples[idx]
         vol_dir = sample["volume_file_dir"]
         label_vec = sample["label_vec"].clone()  # shape [5]
@@ -217,8 +200,8 @@ class MultiLabelVisionDataset(Dataset):
         for modality in modalities:
             npy_path = sample["volume_non_seg_files"][modality]
             npy_path = self.convert_file_path_to_npy(npy_path)
-            vol_data = np.load(npy_path)      # shape e.g. [1, 32, 256, 256]
-            vol_data = self.transform(vol_data)    # apply MONAI transforms
+            vol_data = np.load(npy_path)  # shape e.g. [1, 32, 256, 256]
+            vol_data = self.transform(vol_data)
             returned_dict[modality] = vol_data
 
         returned_dict["labels"] = label_vec
@@ -226,43 +209,39 @@ class MultiLabelVisionDataset(Dataset):
         return returned_dict
 
     def convert_file_path_to_npy(self, image_abs_path):
-        """
-        Same logic from VQABratsDataset to map a path to the .npy location.
-        Adjust if your data layout differs.
-        """
         volume_abs_dir = os.path.dirname(image_abs_path)
         base_dir = os.path.dirname(volume_abs_dir)
         new_base_dir = base_dir + "_npy"
-
         volume_dir = os.path.basename(volume_abs_dir)
         image_file = os.path.basename(image_abs_path)
         new_image_abs_path = os.path.join(new_base_dir, volume_dir, image_file + ".npy")
         return new_image_abs_path
 
-# ------------------------------------------------------------------------
-# Vision classifier that wraps the vision tower + a custom classifier head
-# ------------------------------------------------------------------------
+
 class VisionMultiLabelClassifier(nn.Module):
     def __init__(self, vision_tower: nn.Module, num_labels: int, num_modalities=4):
         """
-        :param vision_tower: The extracted vision model (e.g. `model.get_model().vision_tower`).
-        :param num_labels: Number of labels for multi-label classification.
+        :param vision_tower: The extracted vision model.
+        :param num_labels:   Number of labels for multi-label classification.
+        :param num_modalities: How many modalities we are concatenating feature-wise.
         """
         super().__init__()
         self.vision_tower = vision_tower
+        # We'll assume each single modality forward returns shape [B, 768]
         hidden_dim = 768 * num_modalities
         self.classifier = nn.Linear(hidden_dim, num_labels)
 
     def forward(self, mod1, mod2, mod3, mod4, labels=None):
+        # Each featsX shape: [B, 768]
         feats1 = self.vision_tower.forward(mod1)
         feats2 = self.vision_tower.forward(mod2)
         feats3 = self.vision_tower.forward(mod3)
         feats4 = self.vision_tower.forward(mod4)
+        # Concat along dim=1 => shape [B, 768*4]
         feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)
         logits = self.classifier(feats)
 
         if labels is not None:
-            # For multi-label classification, we typically use BCEWithLogitsLoss
             loss_fn = nn.BCEWithLogitsLoss()
             loss = loss_fn(logits, labels)
             return loss, logits
@@ -270,16 +249,17 @@ class VisionMultiLabelClassifier(nn.Module):
             return logits
 
 
-# ------------------------------------------------------------------------
-# Main training script
-# ------------------------------------------------------------------------
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
-    logger = setup_logger(log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_toward_{args.freeze_vision_tower}_num_epochs_{args.num_epochs}_training.log", log_to_console=True)
-
+    logger = setup_logger(
+        log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}.log",
+        log_to_console=True
+    )
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+
+    # Replace with your actual JSON paths
     train_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_v2.json"
     val_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_v2.json"
     test_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json"
@@ -297,54 +277,53 @@ def main():
     vision_tower = base_model.get_model().get_vision_tower()
     vision_tower.select_feature = "cls_patch"
     if vision_tower is None:
-        raise ValueError(
-            "No vision tower found in the loaded model. Ensure `vision_tower` is correctly specified."
-        )
-    # Optionally freeze the entire vision tower
+        raise ValueError("No vision tower found in the loaded model. Check `vision_tower` args.")
+
     if args.freeze_vision_tower:
         for param in vision_tower.parameters():
             param.requires_grad = False
+        logger.info("Vision tower is frozen.")
+    else:
+        logger.info("Vision tower is unfrozen. Fine-tuning it.")
 
-    logger.info(f"Created vision tower from {args.model_name_or_path} with frozen_vision_tower={args.freeze_vision_tower}")
-
-
-    # Create our classification model
     model = VisionMultiLabelClassifier(vision_tower=vision_tower, num_labels=args.num_labels).to(device)
 
-
+    # --------------------------------------------------------------------
+    # 2) Datasets / Dataloaders
+    # --------------------------------------------------------------------
     train_dataset = MultiLabelVisionDataset(data_file=train_file, mode="train")
     val_dataset = MultiLabelVisionDataset(data_file=val_file, mode="validation")
     test_dataset = MultiLabelVisionDataset(data_file=test_file, mode="test")
 
-    logger.info(f"Dataset sizes: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
-
-
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
+    logger.info(f"Dataset sizes => train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
+
     # --------------------------------------------------------------------
-    # 3) Set up the optimizer
+    # 3) Optimizer
     # --------------------------------------------------------------------
-    # Include only the model parameters that `requires_grad = True`
-    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()),
-                            lr=args.learning_rate)
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
 
     # --------------------------------------------------------------------
     # 4) Training Loop
     # --------------------------------------------------------------------
     best_val_loss = float('inf')
-    model.train()
+    best_model_path = os.path.join(args.output_dir, "best_model.pt")
+    os.makedirs(args.output_dir, exist_ok=True)
 
     logger.info(f"Starting training for {args.num_epochs} epochs, LR={args.learning_rate}")
     for epoch in range(args.num_epochs):
+        model.train()
         total_loss = 0.0
-        for sample in tqdm(train_loader):
+
+        for sample in tqdm(train_loader, desc=f"Epoch {epoch + 1} [Train]"):
             mod1 = sample["t1c"].to(device)
             mod2 = sample["t1n"].to(device)
             mod3 = sample["t2f"].to(device)
             mod4 = sample["t2w"].to(device)
-            labels = sample['labels'].to(device)
+            labels = sample["labels"].to(device)
 
             optimizer.zero_grad()
             loss, logits = model(mod1, mod2, mod3, mod4, labels=labels)
@@ -357,33 +336,102 @@ def main():
         logger.info(f"Epoch [{epoch + 1}/{args.num_epochs}] - Train Loss: {avg_train_loss:.4f}")
 
         # ------------------------------
-        #  Validation
+        # Validation
         # ------------------------------
         val_loss = 0.0
         model.eval()
         with torch.no_grad():
-            for sample in tqdm(val_loader):
+            for sample in tqdm(val_loader, desc=f"Epoch {epoch + 1} [Val]"):
                 mod1 = sample["t1c"].to(device)
                 mod2 = sample["t1n"].to(device)
                 mod3 = sample["t2f"].to(device)
                 mod4 = sample["t2w"].to(device)
-                labels = sample['labels'].to(device)
-                loss, logits = model(mod1, mod2, mod3, mod4, labels=labels)
-                val_loss += loss.item()
+                labels = sample["labels"].to(device)
+
+                batch_loss, logits = model(mod1, mod2, mod3, mod4, labels=labels)
+                val_loss += batch_loss.item()
 
         val_loss /= len(val_loader)
         logger.info(f"Epoch [{epoch + 1}/{args.num_epochs}] - Validation Loss: {val_loss:.4f}")
-        model.train()
 
         # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            os.makedirs(args.output_dir, exist_ok=True)
-            checkpoint_path = os.path.join(args.output_dir, "best_model.pt")
-            torch.save(model.state_dict(), checkpoint_path)
-            logger.info(f"New best val loss. Model saved to {checkpoint_path}")
+            torch.save(model.state_dict(), best_model_path)
+            logger.info(f"New best val loss = {val_loss:.4f}. Saved model to {best_model_path}")
 
     logger.info("Training complete.")
+
+    # --------------------------------------------------------------------
+    # 5) Evaluate best model on the test set: AUC-ROC & Accuracy
+    # --------------------------------------------------------------------
+    logger.info("Evaluating on the test set using best checkpoint...")
+    model.load_state_dict(torch.load(best_model_path))
+    model.eval()
+
+    all_labels = []
+    all_logits = []
+
+    with torch.no_grad():
+        for sample in tqdm(test_loader, desc="Test Eval"):
+            mod1 = sample["t1c"].to(device)
+            mod2 = sample["t1n"].to(device)
+            mod3 = sample["t2f"].to(device)
+            mod4 = sample["t2w"].to(device)
+            labels = sample["labels"].to(device)
+
+            # Forward pass without computing loss
+            logits = model(mod1, mod2, mod3, mod4, labels=None)
+            all_labels.append(labels)
+            all_logits.append(logits)
+
+    # Stack everything
+    all_labels = torch.cat(all_labels, dim=0)  # shape [N, 5]
+    all_logits = torch.cat(all_logits, dim=0)  # shape [N, 5]
+
+    # Convert to CPU numpy
+    all_labels_np = all_labels.cpu().numpy()  # 0/1 for each label
+    all_probs_np = torch.sigmoid(all_logits).cpu().numpy()  # [0..1] for each label
+
+    # ------------------------------------------------------------
+    # Compute AUC for each label, then macro-average
+    # ------------------------------------------------------------
+    # If there's a case where a label is always 0 or always 1,
+    # roc_auc_score can fail. For a real pipeline, handle that carefully.
+    num_labels = all_labels_np.shape[1]
+    label_aucs = []
+    for i in range(num_labels):
+        # If all_labels_np[:, i] has both 0 and 1, we can compute AUC
+        if len(np.unique(all_labels_np[:, i])) == 2:
+            auc_i = roc_auc_score(all_labels_np[:, i], all_probs_np[:, i])
+            label_aucs.append(auc_i)
+        else:
+            # If a label never appears or is always 1, skip or treat as NaN
+            label_aucs.append(float('nan'))
+
+    macro_auc = np.nanmean(label_aucs)
+
+    # ------------------------------------------------------------
+    # Compute multi-label accuracy
+    #   We'll threshold each probability at 0.5, compare to ground truth.
+    #   Then compute per-label accuracy, and macro-average across labels.
+    # ------------------------------------------------------------
+    preds_binary = (all_probs_np >= 0.5).astype(int)  # shape [N, 5]
+    label_accs = []
+    for i in range(num_labels):
+        acc_i = accuracy_score(all_labels_np[:, i], preds_binary[:, i])
+        label_accs.append(acc_i)
+    macro_acc = np.mean(label_accs)
+
+    # Log final metrics
+    logger.info("========== TEST METRICS ==========")
+    for i in range(num_labels):
+        logger.info(f"Label {i} '{list(self.label2id.keys())[i]}' => "
+                    f"AUC={label_aucs[i]:.4f} | ACC={label_accs[i]:.4f}")
+    logger.info(f"Test Macro AUC = {macro_auc:.4f}")
+    logger.info(f"Test Macro Accuracy = {macro_acc:.4f}")
+
+    logger.info("Evaluation complete.")
 
 
 if __name__ == "__main__":
