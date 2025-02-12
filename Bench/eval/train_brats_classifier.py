@@ -46,7 +46,6 @@ def setup_logger(log_file="training.log", log_to_console=True):
 class VisionTrainingArguments:
     """
     Minimal training arguments for the vision classifier.
-    Feel free to expand with any arguments you need.
     """
     model_name_or_path: str = field(
         default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/hf",
@@ -71,7 +70,7 @@ class VisionTrainingArguments:
     )
 
     num_labels: int = field(
-        default=5,
+        default=4,
         metadata={"help": "Number of labels for multi-label classification."}
     )
 
@@ -88,9 +87,13 @@ class MultiLabelVisionDataset(Dataset):
     A multi-label vision-only dataset that:
       1) Reads the same JSON structure used by VQABratsDataset.
       2) Groups entries by 'volume_file_dir'.
-      3) Only uses five *fixed* labels (specified below).
+      3) Only uses *four* labels (ignoring 'Tumor Core'):
+         - Non-Enhancing Tumor
+         - Surrounding Non-enhancing FLAIR hyperintensity
+         - Enhancing Tissue
+         - Resection Cavity
       4) For each label, presence = (content_type=="area" AND answer!="None").
-      5) Creates a 5D multi-hot label vector per volume.
+      5) Creates a 4D multi-hot label vector per volume.
       6) Loads 4 modalities per volume (t1c, t1n, t2f, t2w).
       7) Returns {'t1c':..., 't1n':..., 't2f':..., 't2w':..., 'labels':..., 'volume_file_dir':...}.
     """
@@ -105,17 +108,17 @@ class MultiLabelVisionDataset(Dataset):
         self.mode = mode
 
         # ------------------------------------------------------
-        # 1) Define exactly five labels that you care about
+        # We define exactly four labels and ignore "Tumor Core"
         # ------------------------------------------------------
         self.specified_labels = [
             "Non-Enhancing Tumor",
             "Surrounding Non-enhancing FLAIR hyperintensity",
             "Enhancing Tissue",
-            "Resection Cavity",
-            "Tumor Core"
+            "Resection Cavity"
         ]
+        # Make them lowercase for matching
         self.label2id = {lbl.lower(): i for i, lbl in enumerate(self.specified_labels)}
-        self.num_labels = len(self.specified_labels)  # 5
+        self.num_labels = len(self.specified_labels)  # 4
 
         # ------------------------------------------------------
         # 2) Define transforms (similar to VQABrats code)
@@ -152,7 +155,7 @@ class MultiLabelVisionDataset(Dataset):
             self.samples.append({
                 "volume_file_dir": vol_dir,
                 "volume_non_seg_files": vol_info["volume_non_seg_files"],
-                "label_vec": vol_info["label_vec"],  # 5-dim multi-hot
+                "label_vec": vol_info["label_vec"],  # 4-dim multi-hot
             })
 
     def _read_and_group_data(self, json_path):
@@ -161,7 +164,7 @@ class MultiLabelVisionDataset(Dataset):
         2) Group by volume_file_dir.
         3) For each volume_file_dir:
              - volume_non_seg_files: from the *first* matching entry
-             - label_vec: a 5-dim multi-hot vector (one slot per specified label)
+             - label_vec: a 4-dim multi-hot vector
         """
         with open(json_path, 'r') as f:
             raw_data = json.load(f)
@@ -180,6 +183,7 @@ class MultiLabelVisionDataset(Dataset):
                 label = entry.get("label_name", "").strip().lower()
                 answer_str = str(entry.get("answer", "None")).strip().lower()
 
+                # If label is among our four, mark it if answer != 'none'
                 if label in self.label2id and answer_str != "none":
                     idx = self.label2id[label]
                     grouped[vol_dir]["label_vec"][idx] = 1.0
@@ -192,7 +196,7 @@ class MultiLabelVisionDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.samples[idx]
         vol_dir = sample["volume_file_dir"]
-        label_vec = sample["label_vec"].clone()  # shape [5]
+        label_vec = sample["label_vec"].clone()  # shape [4]
 
         # Load each modality => shape [C, D, H, W], then transform
         modalities = ["t1c", "t1n", "t2f", "t2w"]
@@ -252,11 +256,12 @@ class VisionMultiLabelClassifier(nn.Module):
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
+    version = "v2"
     logger = setup_logger(
-        log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}.log",
+        log_file=f"model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_{version}.log",
         log_to_console=True
     )
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}"
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_{version}"
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
@@ -385,8 +390,8 @@ def main():
             all_logits.append(logits)
 
     # Stack everything
-    all_labels = torch.cat(all_labels, dim=0)  # shape [N, 5]
-    all_logits = torch.cat(all_logits, dim=0)  # shape [N, 5]
+    all_labels = torch.cat(all_labels, dim=0)  # shape [N, 4]
+    all_logits = torch.cat(all_logits, dim=0)  # shape [N, 4]
 
     # Convert to CPU numpy
     all_labels_np = all_labels.cpu().numpy()  # 0/1 for each label
@@ -399,13 +404,11 @@ def main():
     # ------------------------------------------------------------
     label_aucs = []
     for i in range(num_labels):
-        # If test set has both 0 and 1 for label i, we can compute AUC
         unique_vals = np.unique(all_labels_np[:, i])
         if len(unique_vals) == 2:
             auc_i = roc_auc_score(all_labels_np[:, i], all_probs_np[:, i])
             label_aucs.append(auc_i)
         else:
-            # If a label never appears or is always 1, skip or treat as NaN
             label_aucs.append(float('nan'))
 
     macro_auc = np.nanmean(label_aucs)
@@ -415,7 +418,7 @@ def main():
     #   We'll threshold each probability at 0.5, compare to ground truth.
     #   Then compute per-label accuracy, and macro-average across labels.
     # ------------------------------------------------------------
-    preds_binary = (all_probs_np >= 0.5).astype(int)  # shape [N, 5]
+    preds_binary = (all_probs_np >= 0.5).astype(int)  # shape [N, 4]
     label_accs = []
     for i in range(num_labels):
         acc_i = accuracy_score(all_labels_np[:, i], preds_binary[:, i])
@@ -437,7 +440,6 @@ def main():
         "Surrounding Non-enhancing FLAIR hyperintensity",
         "Enhancing Tissue",
         "Resection Cavity",
-        "Tumor Core"
     ]
 
     logger.info("========== TEST METRICS ==========")
