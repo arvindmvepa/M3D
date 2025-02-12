@@ -144,6 +144,8 @@ def main():
                                             temperature=args.temperature)
             generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
 
+            print("generated_texts: ", generated_texts)
+
             result = dict()
             decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
 
