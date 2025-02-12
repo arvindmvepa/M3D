@@ -55,32 +55,44 @@ class VisionTrainingArguments:
     device: str = "cuda"
 
 
-
 class MultiLabelVisionDataset(Dataset):
     """
     A multi-label vision-only dataset that:
       1) Reads the same JSON structure used by VQABratsDataset.
       2) Groups entries by 'volume_file_dir'.
-      3) **Only considers 'content_type' == 'area'** to determine the presence/absence of each label:
-         - If answer != 'None', label is present
-         - If answer == 'None', label is absent
-      4) Creates a multi-hot label vector for each volume by aggregating all present labels.
-      5) Loads 4 modalities per volume into shape [4, C, D, H, W].
-      6) Returns {'image': Tensor, 'labels': multi-hot Tensor}.
+      3) Only uses five *fixed* labels (specified below).
+      4) For each label, presence = (content_type=="area" AND answer!="None").
+      5) Creates a 5D multi-hot label vector per volume.
+      6) Loads 4 modalities per volume (t1c, t1n, t2f, t2w).
+      7) Returns {'t1c':..., 't1n':..., 't2f':..., 't2w':..., 'labels':..., 'volume_file_dir':...}.
     """
 
     def __init__(self, data_file, mode="train"):
         """
-        :param args:  Typically your DataArguments or config with fields:
-                      - vqa_data_train_path / val_path / test_path
-                      - ...
-        :param mode:  'train', 'validation', or 'test'
+        :param data_file: Path to your JSON file (train/val/test).
+        :param mode:      'train', 'validation', or 'test'.
         """
         super().__init__()
+        self.data_file = data_file
         self.mode = mode
 
         # ------------------------------------------------------
-        # Define transforms (same as your VQABrats code)
+        # 1) Define *exactly five* labels that you care about
+        #    (Edit to match your real label names)
+        # ------------------------------------------------------
+        self.specified_labels = [
+            "Non-Enhancing Tumor",
+            "Surrounding Non-enhancing FLAIR hyperintensity",
+            "Enhancing Tissue",
+            "Resection Cavity",
+            "Tumor Core"
+        ]
+        # Map each label to an index: 0..4
+        self.label2id = {lbl: i for i, lbl in enumerate(self.specified_labels)}
+        self.num_labels = len(self.specified_labels)  # 5
+
+        # ------------------------------------------------------
+        # 2) Define transforms (similar to VQABrats code)
         # ------------------------------------------------------
         train_transform = mtf.Compose([
             mtf.RandRotate90(prob=0.5, spatial_axes=(1, 2)),
@@ -94,57 +106,36 @@ class MultiLabelVisionDataset(Dataset):
         val_transform = mtf.Compose([
             mtf.ToTensor(dtype=torch.float),
         ])
-
         if mode == "train":
             self.transform = train_transform
-        elif mode == "validation":
-            self.transform = val_transform
-        elif "test" in mode:
+        elif mode in ["validation", "test"]:
             self.transform = val_transform
         else:
             raise ValueError(f"Unknown mode {mode}.")
-        self.data_file = data_file
 
-        # Read & group JSON data so each volume_file_dir has:
-        #   1) volume_non_seg_files: { "t1c":..., "t1n":..., "t2f":..., "t2w":... }
-        #   2) a set (or dict) indicating which labels are present
+        # ------------------------------------------------------
+        # 3) Read JSON & group by volume_file_dir
+        # ------------------------------------------------------
         self.data_by_vol = self._read_and_group_data(self.data_file)
 
-        # Build a global sorted list of all possible labels.
-        # We'll create a label->index mapping for multi-hot vectors.
-        all_labels = set()
-        for vol_dir, vol_info in self.data_by_vol.items():
-            all_labels |= vol_info["present_labels"]  # union of sets
-        self.all_labels_sorted = sorted(list(all_labels))
-        self.label2id = {lbl: i for i, lbl in enumerate(self.all_labels_sorted)}
-
-        # Flatten into a list of volumes for __getitem__ indexing
+        # ------------------------------------------------------
+        # 4) Flatten grouped volumes into a list for __getitem__
+        # ------------------------------------------------------
         self.samples = []
         for vol_dir, vol_info in self.data_by_vol.items():
             self.samples.append({
                 "volume_file_dir": vol_dir,
                 "volume_non_seg_files": vol_info["volume_non_seg_files"],
-                # Convert set of labels into a multi-hot vector
-                "label_vec": self._labels_to_multihot(vol_info["present_labels"]),
+                "label_vec": vol_info["label_vec"],  # already a 5-dim multi-hot
             })
-
-    def _labels_to_multihot(self, present_labels):
-        """
-        Convert a set of label names to a multi-hot vector (FloatTensor).
-        """
-        vec = torch.zeros(len(self.all_labels_sorted), dtype=torch.float)
-        for lbl in present_labels:
-            idx = self.label2id[lbl]
-            vec[idx] = 1.0
-        return vec
 
     def _read_and_group_data(self, json_path):
         """
         1) Load the JSON (like VQABratsDataset).
         2) Group by volume_file_dir.
         3) For each volume_file_dir:
-             - Store one volume_non_seg_files (from the first matching entry).
-             - Collect which labels are present (where content_type=="area" and answer!="None").
+             - volume_non_seg_files: from the *first* matching entry
+             - label_vec: a 5-dim multi-hot vector (one slot per specified label)
         """
         with open(json_path, 'r') as f:
             raw_data = json.load(f)
@@ -155,16 +146,19 @@ class MultiLabelVisionDataset(Dataset):
             if vol_dir not in grouped:
                 grouped[vol_dir] = {
                     "volume_non_seg_files": entry["volume_non_seg_files"],
-                    "present_labels": set(),   # We'll fill this in below
+                    # Start with a zero-vector for the 5 labels
+                    "label_vec": torch.zeros(self.num_labels, dtype=torch.float),
                 }
 
-            # We only care about content_type=="area".
-            if entry["content_type"] == "area":
-                label = entry["label_name"]  # e.g. "tumor", "necrosis", "edema"
-                answer_str = str(entry["answer"])  # might be "None", "12.3", "56", etc.
-                if answer_str.lower() != "none":
-                    # Mark this label as present
-                    grouped[vol_dir]["present_labels"].add(label)
+            # We only care about content_type == "area"
+            if entry.get("content_type", "") == "area":
+                label = entry.get("label_name", "").strip().lower()
+                answer_str = str(entry.get("answer", "None")).strip().lower()
+
+                # If this label is in our specified set & answer != "none", mark it present
+                if label in self.label2id and answer_str != "none":
+                    idx = self.label2id[label]
+                    grouped[vol_dir]["label_vec"][idx] = 1.0
 
         return grouped
 
@@ -175,33 +169,35 @@ class MultiLabelVisionDataset(Dataset):
         """
         Returns a dictionary:
           {
-            "image": FloatTensor, shape [4, C, D, H, W]
-            "labels": FloatTensor, shape [num_labels] (multi-hot)
-            "volume_file_dir": ...
+            "t1c":  Tensor [C, D, H, W],
+            "t1n":  Tensor [...],
+            "t2f":  Tensor [...],
+            "t2w":  Tensor [...],
+            "labels": FloatTensor [5], (multi-hot for each of the five labels)
+            "volume_file_dir": str
           }
         """
         sample = self.samples[idx]
         vol_dir = sample["volume_file_dir"]
-        label_vec = sample["label_vec"].clone()  # multi-hot
+        label_vec = sample["label_vec"].clone()  # shape [5]
 
-        # Load each modality to build [4, C, D, H, W]
+        # Load each modality => shape [C, D, H, W], then transform
         modalities = ["t1c", "t1n", "t2f", "t2w"]
-        modality_tensors = []
+        returned_dict = {}
         for modality in modalities:
             npy_path = sample["volume_non_seg_files"][modality]
-            npy_path = self.convert_file_path_to_npy(npy_path)  # same logic as VQABrats
-            vol = np.load(npy_path)      # shape e.g. (1, 32, 256, 256) or (C, D, H, W)
-            vol = self.transform(vol)    # apply MONAI transforms
-            modality_tensors.append(vol)
+            npy_path = self.convert_file_path_to_npy(npy_path)
+            vol_data = np.load(npy_path)      # shape e.g. [1, 32, 256, 256]
+            vol_data = self.transform(vol_data)    # apply MONAI transforms
+            returned_dict[modality] = vol_data
 
-        return_dict = {modality: image for modality, image in zip(modalities, modality_tensors)}
-        return_dict["labels"] = label_vec
-        return_dict["volume_file_dir"] = vol_dir
-        return return_dict
+        returned_dict["labels"] = label_vec
+        returned_dict["volume_file_dir"] = vol_dir
+        return returned_dict
 
     def convert_file_path_to_npy(self, image_abs_path):
         """
-        Same logic from VQABratsDataset to map an original path to a '.npy' location.
+        Same logic from VQABratsDataset to map a path to the .npy location.
         Adjust if your data layout differs.
         """
         volume_abs_dir = os.path.dirname(image_abs_path)
@@ -212,7 +208,6 @@ class MultiLabelVisionDataset(Dataset):
         image_file = os.path.basename(image_abs_path)
         new_image_abs_path = os.path.join(new_base_dir, volume_dir, image_file + ".npy")
         return new_image_abs_path
-
 
 # ------------------------------------------------------------------------
 # Vision classifier that wraps the vision tower + a custom classifier head
