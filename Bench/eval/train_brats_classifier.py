@@ -313,7 +313,6 @@ def main():
     best_val_loss = float('inf')
     best_model_path = os.path.join(output_dir, "best_model.pt")
     os.makedirs(output_dir, exist_ok=True)
-    """
     logger.info(f"Starting training for {args.num_epochs} epochs, LR={args.learning_rate}")
     for epoch in range(args.num_epochs):
         model.train()
@@ -362,7 +361,6 @@ def main():
             logger.info(f"New best val loss = {val_loss:.4f}. Saved model to {best_model_path}")
 
     logger.info("Training complete.")
-    """
     # --------------------------------------------------------------------
     # 5) Evaluate best model on the test set: AUC-ROC & Accuracy & Label Prevalence
     # --------------------------------------------------------------------
