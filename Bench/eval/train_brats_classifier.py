@@ -10,9 +10,6 @@ from dataclasses import dataclass, field
 
 import monai.transforms as mtf
 
-# --- Import your original modules ---
-# You will need to have your environment set so LaMed/src is visible in the path
-# e.g., `export PYTHONPATH=$PYTHONPATH:/path/to/LaMed/src`
 from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
 
 
@@ -74,14 +71,12 @@ class MultiLabelVisionDataset(Dataset):
     def __init__(self, args, mode="train"):
         """
         :param args:  Typically your DataArguments or config with fields:
-                      - data_root
                       - vqa_data_train_path / val_path / test_path
                       - ...
         :param mode:  'train', 'validation', or 'test'
         """
         super().__init__()
         self.args = args
-        self.data_root = args.data_root
         self.mode = mode
 
         # ------------------------------------------------------
