@@ -19,7 +19,7 @@ def main(vqa_data_test_path, output_dir):
         # skip first row
         next(reader)
         for row, sample in tqdm(zip(reader, data_list)):
-            pred = float(row[3])
+            pred = str(row[3])
             accuracy = float(row[4])
             answer = sample['answer']
             q_lang = sample['q_lang']
