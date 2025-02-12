@@ -131,20 +131,11 @@ def main():
             image = sample["image"].to(device=device)
             input_id = tokenizer(question, return_tensors="pt")['input_ids'].to(device=device)
 
-            print("question: ", question)
-            print("answer: ", answer)
-            print("question_type: ", question_type)
-            print("image.shape: ", image.shape)
-            print("input_id.shape: ", input_id.shape)
-
-
             with torch.inference_mode():
                 generation = model.generate(images=image, inputs=input_id, max_new_tokens=args.max_new_tokens,
                                             do_sample=args.do_sample, top_p=args.top_p,
                                             temperature=args.temperature)
             generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
-
-            print("generated_texts: ", generated_texts)
 
             result = dict()
             decoded_preds, decoded_labels = postprocess_text(generated_texts, answer)
