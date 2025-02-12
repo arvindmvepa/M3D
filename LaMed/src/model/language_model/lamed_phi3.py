@@ -178,6 +178,7 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
                 None,
                 None,
                 images,
+                combined_projector=self.config.combined_projector
             )
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
