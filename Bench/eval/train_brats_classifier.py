@@ -363,9 +363,8 @@ def main():
 
     logger.info("Training complete.")
     """
-
     # --------------------------------------------------------------------
-    # 5) Evaluate best model on the test set: AUC-ROC & Accuracy
+    # 5) Evaluate best model on the test set: AUC-ROC & Accuracy & Label Prevalence
     # --------------------------------------------------------------------
     logger.info("Evaluating on the test set using best checkpoint...")
     model.load_state_dict(torch.load(best_model_path))
@@ -395,16 +394,16 @@ def main():
     all_labels_np = all_labels.cpu().numpy()  # 0/1 for each label
     all_probs_np = torch.sigmoid(all_logits).cpu().numpy()  # [0..1] for each label
 
+    num_labels = all_labels_np.shape[1]
+
     # ------------------------------------------------------------
     # Compute AUC for each label, then macro-average
     # ------------------------------------------------------------
-    # If there's a case where a label is always 0 or always 1,
-    # roc_auc_score can fail. For a real pipeline, handle that carefully.
-    num_labels = all_labels_np.shape[1]
     label_aucs = []
     for i in range(num_labels):
-        # If all_labels_np[:, i] has both 0 and 1, we can compute AUC
-        if len(np.unique(all_labels_np[:, i])) == 2:
+        # If test set has both 0 and 1 for label i, we can compute AUC
+        unique_vals = np.unique(all_labels_np[:, i])
+        if len(unique_vals) == 2:
             auc_i = roc_auc_score(all_labels_np[:, i], all_probs_np[:, i])
             label_aucs.append(auc_i)
         else:
@@ -425,14 +424,37 @@ def main():
         label_accs.append(acc_i)
     macro_acc = np.mean(label_accs)
 
+    # ------------------------------------------------------------
+    # Compute label prevalence for the test set
+    #   label_prevalence = fraction of test samples that have label i = 1
+    # ------------------------------------------------------------
+    label_prevs = []
+    for i in range(num_labels):
+        prevalence_i = np.mean(all_labels_np[:, i])  # fraction of 1's
+        label_prevs.append(prevalence_i)
+
     # Log final metrics
+    label_names = [
+        "Non-Enhancing Tumor",
+        "Surrounding Non-enhancing FLAIR hyperintensity",
+        "Enhancing Tissue",
+        "Resection Cavity",
+        "Tumor Core"
+    ]
+
     logger.info("========== TEST METRICS ==========")
     for i in range(num_labels):
-        logger.info(f"Label {i} '{test_dataset.specified_labels[i]}' => "
-                    f"AUC={label_aucs[i]:.4f} | ACC={label_accs[i]:.4f}")
+        label_str = label_names[i]
+        auc_str = f"{label_aucs[i]:.4f}" if not np.isnan(label_aucs[i]) else "N/A"
+        logger.info(
+            f"Label {i}: '{label_str}' "
+            f"=> Prevalence={label_prevs[i] * 100:.2f}% | "
+            f"AUC={auc_str} | "
+            f"ACC={label_accs[i]:.4f}"
+        )
+
     logger.info(f"Test Macro AUC = {macro_auc:.4f}")
     logger.info(f"Test Macro Accuracy = {macro_acc:.4f}")
-
     logger.info("Evaluation complete.")
 
 
