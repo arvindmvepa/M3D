@@ -312,7 +312,7 @@ def main():
     best_val_loss = float('inf')
     best_model_path = os.path.join(args.output_dir, "best_model.pt")
     os.makedirs(args.output_dir, exist_ok=True)
-
+    """
     logger.info(f"Starting training for {args.num_epochs} epochs, LR={args.learning_rate}")
     for epoch in range(args.num_epochs):
         model.train()
@@ -361,6 +361,7 @@ def main():
             logger.info(f"New best val loss = {val_loss:.4f}. Saved model to {best_model_path}")
 
     logger.info("Training complete.")
+    """
 
     # --------------------------------------------------------------------
     # 5) Evaluate best model on the test set: AUC-ROC & Accuracy
@@ -426,7 +427,7 @@ def main():
     # Log final metrics
     logger.info("========== TEST METRICS ==========")
     for i in range(num_labels):
-        logger.info(f"Label {i} '{list(self.label2id.keys())[i]}' => "
+        logger.info(f"Label {i} '{test_dataset.label2id[i]}' => "
                     f"AUC={label_aucs[i]:.4f} | ACC={label_accs[i]:.4f}")
     logger.info(f"Test Macro AUC = {macro_auc:.4f}")
     logger.info(f"Test Macro Accuracy = {macro_acc:.4f}")
