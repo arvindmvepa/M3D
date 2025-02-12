@@ -276,6 +276,7 @@ def main():
         raise ValueError(
             "No vision tower found in the loaded model. Ensure `vision_tower` is correctly specified."
         )
+    print(f"Loaded vision tower")
 
     # Optionally freeze the entire vision tower
     if args.freeze_vision_tower:
@@ -310,12 +311,15 @@ def main():
 
     for epoch in range(args.num_epochs):
         total_loss = 0.0
-        for images, labels in train_loader:
-            images = images.to(device)
-            labels = labels.to(device)
+        for sample in train_loader:
+            mod1 = sample["t1c"].to(device)
+            mod2 = sample["t1n"].to(device)
+            mod3 = sample["t2f"].to(device)
+            mod4 = sample["t2w"].to(device)
+            labels = sample['labels'].to(device)
 
             optimizer.zero_grad()
-            loss, logits = model(images, labels=labels)
+            loss, logits = model(mod1, mod2, mod3, mod4, labels=labels)
             loss.backward()
             optimizer.step()
 
@@ -330,10 +334,13 @@ def main():
         val_loss = 0.0
         model.eval()
         with torch.no_grad():
-            for images, labels in val_loader:
-                images = images.to(device)
-                labels = labels.to(device)
-                loss, logits = model(images, labels=labels)
+            for sample in val_loader:
+                mod1 = sample["t1c"].to(device)
+                mod2 = sample["t1n"].to(device)
+                mod3 = sample["t2f"].to(device)
+                mod4 = sample["t2w"].to(device)
+                labels = sample['labels'].to(device)
+                loss, logits = model(mod1, mod2, mod3, mod4, labels=labels)
                 val_loss += loss.item()
 
         val_loss /= len(val_loader)
