@@ -275,18 +275,6 @@ def main():
     else:
         raise ValueError(f"Unknown model_type {args.model_type}. Supported: ['llama2', 'phi3']")
 
-    # If you want to load pretrained MLLM weights that might contain a better-initialized vision tower
-    if args.pretrain_mllm:
-        ckpt = torch.load(args.pretrain_mllm, map_location="cpu")
-        base_model.load_state_dict(ckpt)
-        print("Loaded pretrained MLLM weights from:", args.pretrain_mllm)
-
-    # Make sure the model has a vision tower
-    # If `args.vision_tower` is not None, the call below should initialize it:
-    if args.vision_tower is not None:
-        base_model.get_model().initialize_vision_modules(model_args=base_model.config)
-
-    # Now extract the actual vision module
     vision_tower = base_model.get_model().get_vision_tower()
     if vision_tower is None:
         raise ValueError(
