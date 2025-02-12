@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # run "accelerate config" first!
-output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-0000
+output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-0000
 accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \
     --multimodal True \
     --combined_projector True \
+    --freeze_vision_tower True \
     --pretrain_mm_mlp_adapter ./LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
     --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_v2.json \
     --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_v2.json \
