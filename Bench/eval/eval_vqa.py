@@ -47,7 +47,7 @@ def parse_args(args=None):
     parser.add_argument('--vqa_data_test_path', type=str, default="/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json")
     parser.add_argument('--output_dir', type=str, default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa/")
 
-    parser.add_argument('--proj_out_num', type=int, default=256)
+    parser.add_argument('--proj_out_num', type=int, default=1024)
 
     return parser.parse_args(args)
 
