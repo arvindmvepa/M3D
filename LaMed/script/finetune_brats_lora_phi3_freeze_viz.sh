@@ -2,7 +2,7 @@
 
 # run "accelerate config" first!
 output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000
-accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
+accelerate launch --gpu_ids $1 --main_process_port 0 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \
