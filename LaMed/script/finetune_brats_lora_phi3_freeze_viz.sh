@@ -2,7 +2,7 @@
 
 # run "accelerate config" first!
 output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000
-accelerate launch --gpu_ids $1 --main_process_port 0 LaMed/src/train/train.py \
+accelerate launch --gpu_ids $1 --main_process_port 29600 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \
@@ -17,9 +17,9 @@ accelerate launch --gpu_ids $1 --main_process_port 0 LaMed/src/train/train.py \
     --bf16 True \
     --output_dir $output_dir \
     --num_train_epochs 5 \
-    --per_device_train_batch_size 4 \
-    --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 1 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 4 \
     --evaluation_strategy "steps" \
     --eval_accumulation_steps 1 \
     --eval_steps 0.04 \
