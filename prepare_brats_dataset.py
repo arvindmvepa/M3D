@@ -11,8 +11,10 @@ from unidecode import unidecode
 import nibabel as nib
 
 
-input_dir = '/local2/shared_data/BraTS2024-BraTS-GLI/training_data1_v2'
-output_dir = '/local2/shared_data/BraTS2024-BraTS-GLI/training_data1_v2_npy'
+#input_dir = '/local2/shared_data/BraTS2024-BraTS-GLI/training_data1_v2'
+#output_dir = '/local2/shared_data/BraTS2024-BraTS-GLI/training_data1_v2_npy'
+input_dir = '/local2/shared_data/BraTS2024-BraTS-GoAT/MICCAI2024-BraTS-GoAT-TrainingData-With-GroundTruth'
+output_dir = '/local2/shared_data/BraTS2024-BraTS-GoAT/MICCAI2024-BraTS-GoAT-TrainingData-With-GroundTruth_npy'
 
 # Get all subfolders [00001, 00002....]
 subfolders = [folder for folder in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, folder))]
