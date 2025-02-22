@@ -59,7 +59,7 @@ def process_subfolder(subfolder):
 
             np.save(output_path, img_trans)
         except:
-            print([img.shape for img in images_3d])
+            print([img.shape for img in img_array])
             print("This folder is vstack error: ", output_path)
 
 
