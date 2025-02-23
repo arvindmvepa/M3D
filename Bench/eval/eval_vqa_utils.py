@@ -102,6 +102,13 @@ def main(vqa_data_test_path, output_dir):
 
 
 if __name__ == "__main__":
-    vqa_data_test_path = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json"
-    output_dir = "./LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000/eval_vqa"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gt_file", type=str,
+                        default="/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json",
+                        help="Path to ground-truth JSON file")
+    parser.add_argument("--output_dir", default="./LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000/eval_vqa",
+                        type=str, required=True, help="Path to predictions JSON file")
+    args = parser.parse_args()
+    vqa_data_test_path = args.gt_file
+    output_dir = args.output_dir
     main(vqa_data_test_path=vqa_data_test_path, output_dir=output_dir)
