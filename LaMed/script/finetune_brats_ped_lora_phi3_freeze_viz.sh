@@ -16,7 +16,7 @@ accelerate launch --gpu_ids $1 --main_process_port 29601 LaMed/src/train/train.p
     --freeze_vision_tower True \
     --bf16 True \
     --output_dir $output_dir \
-    --num_train_epochs 5 \
+    --num_train_epochs 20 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 4 \
