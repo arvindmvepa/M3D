@@ -55,7 +55,6 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
             cache_position: Optional[torch.LongTensor] = None,
             logits_to_keep=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-        print(torch.mean(images), torch.std(images))
 
         input_ids_pre = input_ids
 
