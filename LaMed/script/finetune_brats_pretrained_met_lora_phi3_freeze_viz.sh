@@ -4,7 +4,7 @@
 output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-brats-pretrained-met-viz-0000
 accelerate launch --gpu_ids $1 --main_process_port 29600 LaMed/src/train/train.py \
     --version v0 \
-    --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
+    --model_name_or_path /local2/amvepa91/M3D/LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000/hf \
     --model_type phi3 \
     --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_train_v1.json \
     --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_val_v1.json \
@@ -12,8 +12,6 @@ accelerate launch --gpu_ids $1 --main_process_port 29600 LaMed/src/train/train.p
     --lora_enable True \
     --vision_tower vit3d \
     --pretrain_vision_model /local2/amvepa91/M3D/LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
-    --pretrain_mm_mlp_adapter /local2/amvepa91/M3D/LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
-    --pretrain_mllm /local2/amvepa91/M3D/LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000/hf \
     --freeze_vision_tower True \
     --bf16 True \
     --output_dir $output_dir \
