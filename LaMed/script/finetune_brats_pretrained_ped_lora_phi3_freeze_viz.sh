@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # run "accelerate config" first!
-output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-brats-pretrained-met-viz-0000
-test_path=/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_test_v1.json
+output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-brats-pretrained-ped-viz-0000
+test_path=/local2/amvepa91/MedTrinity-25M/brats_ped_3d_vqa_subjTrue_test_v1.json
 accelerate launch --gpu_ids $1 --main_process_port 29600 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path /local2/amvepa91/M3D/LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000/hf \
     --model_type phi3 \
-    --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_train_v1.json \
-    --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_val_v1.json \
+    --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_ped_3d_vqa_subjTrue_train_v1.json \
+    --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_ped_3d_vqa_subjTrue_val_v1.json \
     --vqa_data_test_path $test_path \
     --lora_enable True \
     --vision_tower vit3d \
