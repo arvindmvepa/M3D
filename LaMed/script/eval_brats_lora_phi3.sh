@@ -1,6 +1,6 @@
 #!/bin/bash
 
-output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-brats-pretrained-ped-viz-0000
+output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-brats-goat-viz-0000
 test_path=/local2/amvepa91/MedTrinity-25M/brats_ped_3d_vqa_subjTrue_test_v1.json
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
