@@ -15,9 +15,14 @@ from sklearn.metrics import roc_auc_score, accuracy_score
 from transformers import HfArgumentParser
 from dataclasses import dataclass, field
 
-import monai.transforms as mtf
+import sys
 
+sys.path.append('/home/acc/NKG/M3D-branch/M3D')
+import monai.transforms as mtf
+from LaMed.src.model.loss import MultiModalContrastiveLoss, GroupContrastiveLoss
 from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
+
+from transformers import HfArgumentParser, AutoModel, AutoConfig
 
 
 def setup_logger(log_file="training.log", log_to_console=True):
@@ -48,7 +53,8 @@ class VisionTrainingArguments:
     Minimal training arguments for the vision classifier.
     """
     model_name_or_path: str = field(
-        default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/hf",
+        default="GoodBaiBai88/M3D-LaMed-Phi-3-4B",
+        # default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/hf",
         metadata={"help": "Path or name of the checkpoint that contains the vision tower."}
     )
     model_type: str = field(
@@ -59,7 +65,10 @@ class VisionTrainingArguments:
         default="vit3d",
         metadata={"help": "Whether we have a vision tower in the loaded model (e.g. 'vit3d')."}
     )
-    pretrain_vision_model: str = field(default=None, metadata={"help": "Path to pretrained model for ViT."})
+    pretrain_vision_model: str = field(default=
+                                       # "GoodBaiBai88/M3D-CLIP",
+                                       "/local2/amvepa91/M3D/LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin",
+                                       metadata={"help": "Path to pretrained model for ViT."})
     pretrain_mllm: str = field(
         default=None,
         metadata={"help": "Path to a pretrained MLLM weights to load into the model (optional)."}
@@ -76,10 +85,10 @@ class VisionTrainingArguments:
     )
 
     # Basic training settings
-    batch_size: int = 4
-    num_epochs: int = 5
+    batch_size: int = 32
+    num_epochs: int = 50
     learning_rate: float = 1e-4
-    output_dir: str = "./vision_classifier_output"
+    output_dir: str = "./SimCLR_vision_classifier_output"
     device: str = "cuda"
 
 
@@ -224,7 +233,7 @@ class MultiLabelVisionDataset(Dataset):
 
 
 class VisionMultiLabelClassifier(nn.Module):
-    def __init__(self, vision_tower: nn.Module, num_labels: int, num_modalities=4):
+    def __init__(self, vision_tower: nn.Module, num_labels: int, num_modalities=4, contrastive_temp=0.5, contrastive_weight=1.0):
         """
         :param vision_tower: The extracted vision model.
         :param num_labels:   Number of labels for multi-label classification.
@@ -236,20 +245,46 @@ class VisionMultiLabelClassifier(nn.Module):
         hidden_dim = 768 * num_modalities
         self.classifier = nn.Linear(hidden_dim, num_labels)
 
+        # self.projection_heads = nn.ModuleList([
+        #     nn.Sequential(
+        #         nn.Linear(768, 768), 
+        #         nn.ReLU(),
+        #         nn.Linear(768, 128) 
+        #     ) for _ in range(num_modalities)
+        # ])
+        
+        
+        self.bce_loss = nn.BCEWithLogitsLoss()
+        # self.contrastive_loss = MultiModalContrastiveLoss(temperature=contrastive_temp)
+        self.contrastive_loss = GroupContrastiveLoss(temperature=contrastive_temp)
+        self.contrastive_weight = contrastive_weight
+        
+        
     def forward(self, mod1, mod2, mod3, mod4, labels=None):
-        # Each featsX shape: [B, 768]
+        # [batch_size, 1, 32, 256, 256]
         feats1 = self.vision_tower.forward(mod1)
         feats2 = self.vision_tower.forward(mod2)
         feats3 = self.vision_tower.forward(mod3)
         feats4 = self.vision_tower.forward(mod4)
-        # Concat along dim=1 => shape [B, 768*4]
-        feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)
-        logits = self.classifier(feats)
 
+        proj_feats = []
+        all_feats = [feats1, feats2, feats3, feats4]
+        # for idx, feats in enumerate(all_feats):
+        #     proj = self.projection_heads[idx](feats)
+        #     proj_feats.append(proj)
+        
+        combined_feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)
+        logits = self.classifier(combined_feats)
+        
+        
         if labels is not None:
-            loss_fn = nn.BCEWithLogitsLoss()
-            loss = loss_fn(logits, labels)
-            return loss, logits
+            class_loss = self.bce_loss(logits, labels)
+            
+            # cont_loss = self.contrastive_loss(all_feats)
+            cont_loss = self.contrastive_loss(all_feats, labels)
+
+            total_loss = class_loss + self.contrastive_weight * cont_loss
+            return total_loss, logits
         else:
             return logits
 
@@ -281,9 +316,19 @@ def main():
     else:
         raise ValueError(f"Unknown model_type {args.model_type}. Supported: ['llama2', 'phi3']")
 
+    print('args.model_name_or_path', args.model_name_or_path)
+    print('os.path.basename(args.model_name_or_path)', os.path.basename(args.model_name_or_path))
+    print('args.pretrain_vision_model', args.pretrain_vision_model)
+    print('os.path.basename(args.pretrain_vision_model)', os.path.basename(args.pretrain_vision_model))
+    
     vision_tower = base_model.get_model().get_vision_tower()
     if args.pretrain_vision_model is not None:
-        state_dict = torch.load(args.pretrain_vision_model)
+        if 'GoodBaiBai88/M3D-CLIP' in args.pretrain_vision_model:
+            state_dict = torch.load("./m3d_clip_model/pretrained_ViT.bin")
+            updated_state_dict = {"vision_tower." + k: v for k, v in state_dict.items()}
+            vision_tower.load_state_dict(updated_state_dict)
+        else:
+            state_dict = torch.load(args.pretrain_vision_model)
         # add vision_tower to the state_dict
         updated_state_dict = {"vision_tower." + k: v for k, v in state_dict.items()}
         vision_tower.load_state_dict(updated_state_dict)
