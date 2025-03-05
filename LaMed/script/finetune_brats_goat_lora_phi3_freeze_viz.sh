@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # run "accelerate config" first!
-output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-brats-goat-viz-0000
+output_dir=./LaMed/output/LaMed-Phi3-4B-llava-finetune-freeze-brats-goat-viz-0000
 accelerate launch --gpu_ids $1 --main_process_port 29601 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
@@ -32,6 +32,8 @@ accelerate launch --gpu_ids $1 --main_process_port 29601 LaMed/src/train/train.p
     --lr_scheduler_type "cosine" \
     --logging_steps 0.001 \
     --gradient_checkpointing False \
+    --proj_pooling_size 1 \
+    --model_max_length 2250 \
     --dataloader_pin_memory True\
     --dataloader_num_workers 8 \
     --report_to tensorboard
