@@ -33,6 +33,7 @@ accelerate launch --gpu_ids $1 --main_process_port 29600 LaMed/src/train/train.p
     --logging_steps 0.001 \
     --gradient_checkpointing False \
     --proj_pooling_size 1 \
+    --model_max_length 2250 \
     --dataloader_pin_memory True\
     --dataloader_num_workers 8 \
     --report_to tensorboard
