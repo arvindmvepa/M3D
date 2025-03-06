@@ -90,9 +90,9 @@ class VisionTrainingArguments:
     learning_rate: float = 1e-4
     output_dir: str = "./SimCLR_vision_classifier_output_met"
     device: str = "cuda"
-    train_file = "/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_train_v1.json"
-    val_file = "/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_val_v1.json"
-    test_file = "/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_test_v1.json"
+    train_file: str = "/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_train_v1.json"
+    val_file: str = "/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_val_v1.json"
+    test_file: str = "/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_test_v1.json"
 
 
 class MultiLabelVisionDataset(Dataset):
