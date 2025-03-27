@@ -200,13 +200,13 @@ class AuxVisionDataset(Dataset):
         ]
         # Load dictionary
         with open(json_path, "r") as f:
-            self.data_dict = json.load(f)
+            self.data_list = json.load(f)
 
         self.samples = []
-        for seg_file, label_info in self.data_dict.items():
+        for datum_dict in self.data_list:
             self.samples.append({
-                "seg_file": seg_file,
-                "label_info": label_info
+                "seg_file": datum_dict["seg_file"],
+                "label_info": datum_dict["labels"]
             })
 
         # If no transform is provided, define a default
@@ -232,14 +232,18 @@ class AuxVisionDataset(Dataset):
     def __getitem__(self, idx):
         data = self.samples[idx]
         seg_file = data["seg_file"]
+        seg_file_npy = self.convert_file_path_to_npy(seg_file)
         label_info = data["label_info"]
 
-        # load or create 4 volumes => [1,D,H,W] each
-        # (placeholder code - adapt to real file paths)
-        mod_t1c = self._random_volume()
-        mod_t1n = self._random_volume()
-        mod_t2f = self._random_volume()
-        mod_t2w = self._random_volume()
+        # Load 4 modalities
+        mod_t1c_file = seg_file_npy.replace("seg", "t1c")
+        mod_t1c = np.load(mod_t1c_file)
+        mod_t1n_file = seg_file_npy.replace("seg", "t1n")
+        mod_t1n = np.load(mod_t1n_file)
+        mod_t2f_file = seg_file_npy.replace("seg", "t2f")
+        mod_t2f = np.load(mod_t2f_file)
+        mod_t2w_file = seg_file_npy.replace("seg", "t2w")
+        mod_t2w = np.load(mod_t2w_file)
 
         if self.transform is not None:
             mod_t1c = self.transform(mod_t1c)
@@ -277,13 +281,14 @@ class AuxVisionDataset(Dataset):
             "seg_file": seg_file
         }
 
-    def _random_volume(self):
-        """
-        Placeholder for actual volume loading.
-        Returns np array shape [1,32,256,256].
-        """
-        arr = np.random.randn(1, 32, 256, 256).astype(np.float32)
-        return arr
+    def convert_file_path_to_npy(self, image_abs_path):
+        volume_abs_dir = os.path.dirname(image_abs_path)
+        base_dir = os.path.dirname(volume_abs_dir)
+        new_base_dir = base_dir + "_npy"
+        volume_dir = os.path.basename(volume_abs_dir)
+        image_file = os.path.basename(image_abs_path)
+        new_image_abs_path = os.path.join(new_base_dir, volume_dir, image_file + ".npy")
+        return new_image_abs_path
 
 # -------------------------------------------------------------------------
 # 6) Model with CORAL heads for area/extent/solidity, plus a bounding-box head
