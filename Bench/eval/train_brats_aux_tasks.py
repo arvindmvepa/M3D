@@ -306,19 +306,19 @@ class VisionAuxClassifierCORAL(nn.Module):
     ):
         super().__init__()
         self.vision_tower = vision_tower
-        hidden_dim = 768 * num_modalities  # example dimension
+        hidden_dim = 768 * num_modalities * 2048  # example dimension
 
         # area => [B,4,(area_levels-1)]
-        self.area_head = nn.Linear(hidden_dim * num_modalities * 2048, 4 * (area_levels - 1))
+        self.area_head = nn.Linear(hidden_dim, 4 * (area_levels - 1))
 
         # extent => [B,4,(extent_levels-1)]
-        self.extent_head = nn.Linear(hidden_dim * num_modalities * 2048, 4 * (extent_levels - 1))
+        self.extent_head = nn.Linear(hidden_dim, 4 * (extent_levels - 1))
 
         # solidity => [B,4,(solidity_levels-1)]
-        self.solidity_head = nn.Linear(hidden_dim * num_modalities * 2048, 4 * (solidity_levels - 1))
+        self.solidity_head = nn.Linear(hidden_dim, 4 * (solidity_levels - 1))
 
         # bbox => [B,4,num_quadrants]
-        self.bbox_head = nn.Linear(hidden_dim * num_modalities * 2048, 4 * num_quadrants)
+        self.bbox_head = nn.Linear(hidden_dim, 4 * num_quadrants)
 
         self.area_levels = area_levels
         self.extent_levels = extent_levels
