@@ -130,7 +130,7 @@ def soft_jaccard_loss(bbox_logits, bbox_targets, eps=1e-7):
 # -------------------------------------------------------------------------
 # 4) Multi-Task Loss: CORAL for area/extent/solidity + Soft Jaccard for bbox
 # -------------------------------------------------------------------------
-def compute_aux_loss_coral(
+def compute_aux_loss(
     area_logits, extent_logits, solidity_logits, bbox_logits,
     area_targets, extent_targets, solidity_targets, bbox_targets,
     K_area=10, K_extent=6, K_solidity=4
@@ -294,7 +294,7 @@ class AuxVisionDataset(Dataset):
 # -------------------------------------------------------------------------
 # 6) Model with CORAL heads for area/extent/solidity, plus a bounding-box head
 # -------------------------------------------------------------------------
-class VisionAuxClassifierCORAL(nn.Module):
+class VisionAuxClassifier(nn.Module):
     def __init__(
         self,
         vision_tower: nn.Module,
@@ -425,7 +425,7 @@ def main():
         logger.info("Vision tower is frozen.")
 
     # Build the multi-task model
-    model = VisionAuxClassifierCORAL(
+    model = VisionAuxClassifier(
         vision_tower=vision_tower,
         num_modalities=4,
         area_levels=10,      # e.g. 10 ordinal categories
@@ -453,7 +453,7 @@ def main():
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
     os.makedirs(args.output_dir, exist_ok=True)
     best_val_loss = float('inf')
-    best_model_path = os.path.join(args.output_dir, "best_coral_model.pt")
+    best_model_path = os.path.join(args.output_dir, "best_model.pt")
 
     # -----------------------------------------------------------
     # 4) Training Loop
@@ -476,7 +476,7 @@ def main():
             optimizer.zero_grad()
             area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
 
-            loss, loss_dict = compute_aux_loss_coral(
+            loss, loss_dict = compute_aux_loss(
                 area_logits, extent_logits, solidity_logits, bbox_logits,
                 area_targets, extent_targets, solidity_targets, bbox_targets,
                 K_area=10, K_extent=6, K_solidity=4
@@ -504,7 +504,7 @@ def main():
                 bbox_targets = batch["bbox_targets"].to(device)
 
                 area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
-                loss, loss_dict = compute_aux_loss_coral(
+                loss, loss_dict = compute_aux_loss(
                     area_logits, extent_logits, solidity_logits, bbox_logits,
                     area_targets, extent_targets, solidity_targets, bbox_targets,
                     K_area=10, K_extent=6, K_solidity=4
