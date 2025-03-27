@@ -17,6 +17,7 @@ from transformers import HfArgumentParser
 import monai.transforms as mtf
 from sklearn.metrics import mean_absolute_error
 from dataclasses import dataclass, field
+from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
 
 
 @dataclass
@@ -308,16 +309,16 @@ class VisionAuxClassifierCORAL(nn.Module):
         hidden_dim = 768 * num_modalities  # example dimension
 
         # area => [B,4,(area_levels-1)]
-        self.area_head = nn.Linear(hidden_dim, 4 * (area_levels - 1))
+        self.area_head = nn.Linear(hidden_dim * num_modalities * 2048, 4 * (area_levels - 1))
 
         # extent => [B,4,(extent_levels-1)]
-        self.extent_head = nn.Linear(hidden_dim, 4 * (extent_levels - 1))
+        self.extent_head = nn.Linear(hidden_dim * num_modalities * 2048, 4 * (extent_levels - 1))
 
         # solidity => [B,4,(solidity_levels-1)]
-        self.solidity_head = nn.Linear(hidden_dim, 4 * (solidity_levels - 1))
+        self.solidity_head = nn.Linear(hidden_dim * num_modalities * 2048, 4 * (solidity_levels - 1))
 
         # bbox => [B,4,num_quadrants]
-        self.bbox_head = nn.Linear(hidden_dim, 4 * num_quadrants)
+        self.bbox_head = nn.Linear(hidden_dim * num_modalities * 2048, 4 * num_quadrants)
 
         self.area_levels = area_levels
         self.extent_levels = extent_levels
@@ -334,6 +335,7 @@ class VisionAuxClassifierCORAL(nn.Module):
         feats4 = self.vision_tower.forward(mod4)
         print(feats1.shape, feats2.shape, feats3.shape, feats4.shape)
         feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)  # [B, 768*4]
+        feats = feats.view(B, -1)
         print(feats.shape)
 
         # area
@@ -378,16 +380,9 @@ class VisionTrainingArguments:
     batch_size: int = 4
     num_epochs: int = 5
     learning_rate: float = 1e-4
-    output_dir: str = "./vision_corall_output"
+    output_dir: str = "./vision_aux_output"
     device: str = "cuda"
 
-
-# -------------------------------------------------------------------------
-# 8) The Main Training/Evaluation Script
-# -------------------------------------------------------------------------
-#   Adapted from your code with CORAL + Jaccard integrated
-# -------------------------------------------------------------------------
-from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
 
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
