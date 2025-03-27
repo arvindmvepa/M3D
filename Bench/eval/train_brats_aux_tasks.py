@@ -333,10 +333,8 @@ class VisionAuxClassifierCORAL(nn.Module):
         feats2 = self.vision_tower.forward(mod2)
         feats3 = self.vision_tower.forward(mod3)
         feats4 = self.vision_tower.forward(mod4)
-        print(feats1.shape, feats2.shape, feats3.shape, feats4.shape)
         feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)  # [B, 768*4]
         feats = feats.view(B, -1)
-        print(feats.shape)
 
         # area
         area_raw = self.area_head(feats)  # [B,4*(K-1)]
