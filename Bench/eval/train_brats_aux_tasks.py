@@ -20,46 +20,6 @@ from dataclasses import dataclass, field
 from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
 
 
-@dataclass
-class VisionTrainingArguments:
-    """
-    Minimal training arguments for the vision classifier.
-    """
-    model_name_or_path: str = field(
-        default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/hf",
-        metadata={"help": "Path or name of the checkpoint that contains the vision tower."}
-    )
-    model_type: str = field(
-        default="phi3",
-        metadata={"help": "Model type to load. Options: ['llama2', 'phi3']"}
-    )
-    vision_tower: str = field(
-        default="vit3d",
-        metadata={"help": "Whether we have a vision tower in the loaded model (e.g. 'vit3d')."}
-    )
-    pretrain_vision_model: str = field(default=None, metadata={"help": "Path to pretrained model for ViT."})
-    pretrain_mllm: str = field(
-        default=None,
-        metadata={"help": "Path to a pretrained MLLM weights to load into the model (optional)."}
-    )
-
-    freeze_vision_tower: bool = field(
-        default=True,
-        metadata={"help": "Whether to freeze the entire vision tower during training."}
-    )
-
-    num_labels: int = field(
-        default=4,
-        metadata={"help": "Number of labels for multi-label classification."}
-    )
-
-    # Basic training settings
-    batch_size: int = 4
-    num_epochs: int = 5
-    learning_rate: float = 1e-4
-    output_dir: str = "./aux_classifier_output"
-    device: str = "cuda"
-
 def setup_logger(log_file="training.log", log_to_console=True):
     logger = logging.getLogger("training_logger")
     logger.setLevel(logging.INFO)
