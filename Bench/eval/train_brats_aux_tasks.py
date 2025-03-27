@@ -346,8 +346,10 @@ def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_pretrained_vision_tower_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}"
     logger = setup_logger(
-        log_file=f"training.log",
+        log_file=os.path.join(output_dir,
+                              f"aux_model_name_{os.path.basename(args.model_name_or_path)}_pretrained_vision_tower_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}.log"),
         log_to_console=True
     )
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -411,9 +413,9 @@ def main():
     # 3) Optimizer
     # -----------------------------------------------------------
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     best_val_loss = float('inf')
-    best_model_path = os.path.join(args.output_dir, "best_model.pt")
+    best_model_path = os.path.join(output_dir, "best_model.pt")
 
     # -----------------------------------------------------------
     # 4) Training Loop
