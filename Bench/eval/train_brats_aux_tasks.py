@@ -393,9 +393,9 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     # Example JSON paths for training
-    train_file = "brats_gli_3d_vqa_subjTrue_train_aux_v6_seed0.json"
-    val_file = "brats_gli_3d_vqa_subjTrue_val_aux_v6_seed0.json"
-    test_file = "brats_gli_3d_vqa_subjTrue_test_aux_v6_seed0.json"
+    train_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_aux_v6_seed0.json"
+    val_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_aux_v6_seed0.json"
+    test_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_aux_v6_seed0.json"
 
     # -----------------------------------------------------------
     # 1) Load the base MLLM with a vision tower
