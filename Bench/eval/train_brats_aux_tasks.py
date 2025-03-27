@@ -347,6 +347,7 @@ def main():
     (args,) = parser.parse_args_into_dataclasses()
 
     output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}"
+    os.makedirs(output_dir, exist_ok=True)
     logger = setup_logger(
         log_file=os.path.join(output_dir,
                               f"aux_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}.log"),
@@ -413,7 +414,6 @@ def main():
     # 3) Optimizer
     # -----------------------------------------------------------
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
-    os.makedirs(output_dir, exist_ok=True)
     best_val_loss = float('inf')
     best_model_path = os.path.join(output_dir, "best_model.pt")
 
