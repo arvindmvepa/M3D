@@ -40,7 +40,6 @@ for i in range(27):
 
 
 def make_soft_label(gt_quadrants, dist_matrix, sigma=1.0):
-    print("gt_quadrants:", gt_quadrants)
     label = torch.zeros(27)
     for i in gt_quadrants:
         # If `i` is a PyTorch scalar tensor, do `i_val = i.item()`
