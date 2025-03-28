@@ -186,8 +186,7 @@ def compute_aux_loss(
     solidity_loss = coral_loss(solidity_2d, solidity_tgt_1d, K_solidity)
 
     if dist_bbox_loss:
-        # make sure to add a .10 multiplier because of large loss size
-        bbox_loss = .10 * distance_aware_bce_loss(bbox_logits, bbox_targets)
+        bbox_loss = distance_aware_bce_loss(bbox_logits, bbox_targets)
     else:
         bbox_loss = soft_jaccard_loss(bbox_logits, bbox_targets)
 
