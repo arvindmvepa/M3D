@@ -40,20 +40,15 @@ for i in range(27):
 
 
 def make_soft_label(gt_quadrants, dist_matrix, sigma=1.0):
-    """
-    gt_quadrants: a list or set of quadrant indices (0..26) that are truly 'on'
-    dist_matrix:  27x27 precomputed Euclidean distances
-    sigma:        RBF bandwidth (the smaller, the faster the drop-off)
-
-    Returns a 1D Tensor of length 27 with values in [0..1].
-    """
     label = torch.zeros(27)
     for i in gt_quadrants:
+        # If `i` is a PyTorch scalar tensor, do `i_val = i.item()`
+        # If `i` is already an int, you can skip this.
+        i_val = int(i)  # or i.item() if it's a 1-element tensor
+
         for j in range(27):
-            dist_ij = dist_matrix[i][j]
-            # RBF kernel
+            dist_ij = dist_matrix[i_val][j]
             val = math.exp(- (dist_ij**2) / (2*(sigma**2)))
-            # Accumulate partial 'on' values, clamp at 1
             label[j] = min(1.0, label[j] + val)
     return label
 
@@ -147,7 +142,7 @@ def soft_jaccard_loss(bbox_logits, bbox_targets, eps=1e-7):
     p = torch.sigmoid(bbox_logits)  # => [B,4,Q]
     intersection = (p * bbox_targets).sum(dim=2)  # [B,4]
     union = (p + bbox_targets - p*bbox_targets).sum(dim=2)  # [B,4]
-    jaccard = intersection / (union + eps)  # [B,4]
+    jaccard = (intersection + eps) / (union + eps)  # [B,4]
     return 1.0 - jaccard.mean()
 
 # -------------------------------------------------------------------------
