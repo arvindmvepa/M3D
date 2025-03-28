@@ -428,7 +428,10 @@ def main():
     for epoch in range(args.num_epochs):
         model.train()
         total_loss = 0.0
-
+        area_loss = 0.0
+        extent_loss = 0.0
+        solidity_loss = 0.0
+        bbox_loss = 0.0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1} [Train]"):
             mod1 = batch["t1c"].to(device)
             mod2 = batch["t1n"].to(device)
@@ -451,9 +454,18 @@ def main():
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+            area_loss += loss_dict["area_loss"]
+            extent_loss += loss_dict["extent_loss"]
+            solidity_loss += loss_dict["solidity_loss"]
+            bbox_loss += loss_dict["bbox_loss"]
 
         avg_train_loss = total_loss / len(train_loader)
-        logger.info(f"Epoch {epoch+1} - Train Loss: {avg_train_loss:.4f}")
+        area_loss /= len(train_loader)
+        extent_loss /= len(train_loader)
+        solidity_loss /= len(train_loader)
+        bbox_loss /= len(train_loader)
+
+        logger.info(f"Epoch {epoch+1} - Train Loss: {avg_train_loss:.4f} - Area Loss: {area_loss:.4f} - Extent Loss: {extent_loss:.4f} - Solidity Loss: {solidity_loss:.4f} - BBox Loss: {bbox_loss:.4f}")
 
         # Validation
         val_loss = 0.0
