@@ -480,10 +480,10 @@ def main():
                     area_targets, extent_targets, solidity_targets, bbox_targets,
                     K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox
                 )
-                area_val_loss += loss_dict["area_loss"].item()
-                extent_val_loss += loss_dict["extent_loss"].item()
-                solidity_val_loss += loss_dict["solidity_loss"].item()
-                bbox_val_loss += loss_dict["bbox_loss"].item()
+                area_val_loss += loss_dict["area_loss"]
+                extent_val_loss += loss_dict["extent_loss"]
+                solidity_val_loss += loss_dict["solidity_loss"]
+                bbox_val_loss += loss_dict["bbox_loss"]
 
                 val_loss += loss.item()
 
