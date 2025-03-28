@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import math
 
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -18,6 +19,43 @@ import monai.transforms as mtf
 from sklearn.metrics import mean_absolute_error
 from dataclasses import dataclass, field
 from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
+
+
+# Precompute a 27x27 dist_matrix
+dist_matrix = [[0.0]*27 for _ in range(27)]
+
+coords_3d = []
+for idx in range(27):
+    r = idx // 9
+    c = (idx % 9) // 3
+    d = idx % 3
+    coords_3d.append((r, c, d))
+
+for i in range(27):
+    (r1, c1, d1) = coords_3d[i]
+    for j in range(27):
+        (r2, c2, d2) = coords_3d[j]
+        dist = math.sqrt((r1 - r2)**2 + (c1 - c2)**2 + (d1 - d2)**2)
+        dist_matrix[i][j] = dist
+
+
+def make_soft_label(gt_quadrants, dist_matrix, sigma=1.0):
+    """
+    gt_quadrants: a list or set of quadrant indices (0..26) that are truly 'on'
+    dist_matrix:  27x27 precomputed Euclidean distances
+    sigma:        RBF bandwidth (the smaller, the faster the drop-off)
+
+    Returns a 1D Tensor of length 27 with values in [0..1].
+    """
+    label = torch.zeros(27)
+    for i in gt_quadrants:
+        for j in range(27):
+            dist_ij = dist_matrix[i][j]
+            # RBF kernel
+            val = math.exp(- (dist_ij**2) / (2*(sigma**2)))
+            # Accumulate partial 'on' values, clamp at 1
+            label[j] = min(1.0, label[j] + val)
+    return label
 
 
 def setup_logger(log_file="training.log", log_to_console=True):
@@ -72,9 +110,34 @@ def coral_predict(logits, K):
     passed = (probs >= 0.5).sum(dim=1)  # how many thresholds were exceeded
     return passed
 
-# -------------------------------------------------------------------------
-# 3) Soft Jaccard Loss for Bounding Boxes
-# -------------------------------------------------------------------------
+
+def distance_aware_bce_loss(logits, gt_quadrants_batch, sigma=1.0):
+    """
+    logits: shape [B, 27], raw logits for each quadrant 0..26
+    gt_quadrants_batch: list of length B, each is a list/set of 'on' quadrants
+    dist_matrix: 27x27 precomputed
+    sigma: RBF bandwidth
+    Returns a scalar BCE loss computed against the soft label.
+    """
+    B = logits.size(0)
+
+    # Build a [B,27] Tensor of soft labels
+    all_labels = []
+    for b in range(B):
+        gt_quadrants = gt_quadrants_batch[b]
+        label_b = make_soft_label(gt_quadrants, dist_matrix, sigma=sigma)  # [27]
+        all_labels.append(label_b)
+
+    soft_labels = torch.stack(all_labels, dim=0).to(logits.device)  # [B,27]
+
+    # Then standard BCEWithLogits
+    # or you can do manual BCE => - [ label*log(sigmoid(l)) + (1-label)*log(1-sigmoid(l)) ]
+    # We'll do PyTorch's built-in:
+    bce_loss = F.binary_cross_entropy_with_logits(logits, soft_labels)
+
+    return bce_loss
+
+
 def soft_jaccard_loss(bbox_logits, bbox_targets, eps=1e-7):
     """
     bbox_logits: [B,4,Q]  raw
@@ -93,7 +156,8 @@ def soft_jaccard_loss(bbox_logits, bbox_targets, eps=1e-7):
 def compute_aux_loss(
     area_logits, extent_logits, solidity_logits, bbox_logits,
     area_targets, extent_targets, solidity_targets, bbox_targets,
-    K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=False
+    K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=False,
+    dist_bbox_loss=False
 ):
     """
     area_logits: [B,4,(K_area-1)]
@@ -122,8 +186,10 @@ def compute_aux_loss(
     solidity_tgt_1d = solidity_targets.view(B*4)
     solidity_loss = coral_loss(solidity_2d, solidity_tgt_1d, K_solidity)
 
-    # bbox => soft Jaccard
-    bbox_loss = soft_jaccard_loss(bbox_logits, bbox_targets)
+    if dist_bbox_loss:
+        bbox_loss = distance_aware_bce_loss(bbox_logits, bbox_targets)
+    else:
+        bbox_loss = soft_jaccard_loss(bbox_logits, bbox_targets)
 
     if keep_only_bbox:
         total_loss = bbox_loss
@@ -345,17 +411,18 @@ class VisionTrainingArguments:
     device: str = "cuda"
     tag: str = ""
     keep_only_bbox: bool = False
+    dist_bbox_loss: bool = False
 
 
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keepOnlyBbox_{args.keep_only_bbox}" + args.tag
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_dist_bbox_loss_{args.dist_bbox_loss}" + args.tag
     os.makedirs(output_dir, exist_ok=True)
     logger = setup_logger(
         log_file=os.path.join(output_dir,
-                              f"aux_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keepOnlyBbox_{args.keep_only_bbox}.log"),
+                              f"aux_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_dist_bbox_loss_{args.dist_bbox_loss}.log"),
         log_to_console=True
     )
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -449,7 +516,8 @@ def main():
             loss, loss_dict = compute_aux_loss(
                 area_logits, extent_logits, solidity_logits, bbox_logits,
                 area_targets, extent_targets, solidity_targets, bbox_targets,
-                K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox
+                K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox,
+                dist_bbox_loss=args.dist_bbox_loss
             )
             loss.backward()
             optimizer.step()
@@ -490,7 +558,8 @@ def main():
                 loss, loss_dict = compute_aux_loss(
                     area_logits, extent_logits, solidity_logits, bbox_logits,
                     area_targets, extent_targets, solidity_targets, bbox_targets,
-                    K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox
+                    K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox,
+                    dist_bbox_loss=args.dist_bbox_loss
                 )
                 area_val_loss += loss_dict["area_loss"]
                 extent_val_loss += loss_dict["extent_loss"]
