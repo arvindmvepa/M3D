@@ -110,7 +110,6 @@ def coral_predict(logits, K):
 def distance_aware_bce_loss(
     logits,               # shape [B, L, 27]
     gt_quadrants_batch,   # list of length B, each is list of length L, each is list of quadrant indices
-    dist_matrix,
     sigma=1.0
 ):
     """
