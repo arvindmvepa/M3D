@@ -107,31 +107,36 @@ def coral_predict(logits, K):
     return passed
 
 
-def distance_aware_bce_loss(logits, gt_quadrants_batch, sigma=1.0):
+def distance_aware_bce_loss(
+    logits,               # shape [B, L, 27]
+    gt_quadrants_batch,   # list of length B, each is list of length L, each is list of quadrant indices
+    dist_matrix,
+    sigma=1.0
+):
     """
-    logits: shape [B, 27], raw logits for each quadrant 0..26
-    gt_quadrants_batch: list of length B, each is a list/set of 'on' quadrants
-    dist_matrix: 27x27 precomputed
-    sigma: RBF bandwidth
-    Returns a scalar BCE loss computed against the soft label.
+    Builds a [B, L, 27] soft label for each (b, l) from gt_quadrants_batch
+    using RBF adjacency. Then does standard BCEWithLogits with that label.
+    Returns a scalar loss.
     """
-    B = logits.size(0)
+    B, L, Q = logits.shape
+    if Q != 27:
+        raise ValueError(f"Expected 27 quadrants, got Q={Q}.")
 
-    # Build a [B,27] Tensor of soft labels
-    all_labels = []
+    # We'll build a tensor of shape [B, L, 27] for soft labels
+    soft_labels = torch.zeros(B, L, 27, dtype=torch.float, device=logits.device)
+
     for b in range(B):
-        gt_quadrants = gt_quadrants_batch[b]
-        label_b = make_soft_label(gt_quadrants, dist_matrix, sigma=sigma)  # [27]
-        all_labels.append(label_b)
+        label_sets_for_b = gt_quadrants_batch[b]  # list of length L
+        if len(label_sets_for_b) != L:
+            raise ValueError(f"Sample {b} has {len(label_sets_for_b)} label sets, expected {L}.")
 
-    soft_labels = torch.stack(all_labels, dim=0).to(logits.device)  # [B,27]
+        for l in range(L):
+            gt_quadrants = label_sets_for_b[l]  # e.g. [0,1,2]
+            soft_label_1d = make_soft_label(gt_quadrants, dist_matrix, sigma=sigma)  # shape [27]
+            soft_labels[b, l, :] = soft_label_1d
 
-    # Then standard BCEWithLogits
-    # or you can do manual BCE => - [ label*log(sigmoid(l)) + (1-label)*log(1-sigmoid(l)) ]
-    # We'll do PyTorch's built-in:
-    bce_loss = F.binary_cross_entropy_with_logits(logits, soft_labels)
-
-    return bce_loss
+    # Now standard BCEWithLogits
+    return F.binary_cross_entropy_with_logits(logits, soft_labels)
 
 
 def soft_jaccard_loss(bbox_logits, bbox_targets, eps=1e-7):
