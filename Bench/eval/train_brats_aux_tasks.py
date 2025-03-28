@@ -93,7 +93,7 @@ def soft_jaccard_loss(bbox_logits, bbox_targets, eps=1e-7):
 def compute_aux_loss(
     area_logits, extent_logits, solidity_logits, bbox_logits,
     area_targets, extent_targets, solidity_targets, bbox_targets,
-    K_area=10, K_extent=6, K_solidity=4
+    K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=False
 ):
     """
     area_logits: [B,4,(K_area-1)]
@@ -125,7 +125,10 @@ def compute_aux_loss(
     # bbox => soft Jaccard
     bbox_loss = soft_jaccard_loss(bbox_logits, bbox_targets)
 
-    total_loss = area_loss + extent_loss + solidity_loss + bbox_loss
+    if keep_only_bbox:
+        total_loss = bbox_loss
+    else:
+        total_loss = area_loss + extent_loss + solidity_loss + bbox_loss
     loss_dict = {
         "area_loss": area_loss.item(),
         "extent_loss": extent_loss.item(),
@@ -340,17 +343,19 @@ class VisionTrainingArguments:
     learning_rate: float = 1e-4
     output_dir: str = "./vision_aux_output"
     device: str = "cuda"
+    tag: str = ""
+    keep_only_bbox: bool = False
 
 
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}"
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keepOnlyBbox_{args.keep_only_bbox}" + args.tag
     os.makedirs(output_dir, exist_ok=True)
     logger = setup_logger(
         log_file=os.path.join(output_dir,
-                              f"aux_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}.log"),
+                              f"aux_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keepOnlyBbox_{args.keep_only_bbox}.log"),
         log_to_console=True
     )
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -441,7 +446,7 @@ def main():
             loss, loss_dict = compute_aux_loss(
                 area_logits, extent_logits, solidity_logits, bbox_logits,
                 area_targets, extent_targets, solidity_targets, bbox_targets,
-                K_area=10, K_extent=6, K_solidity=4
+                K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox
             )
             loss.backward()
             optimizer.step()
@@ -452,6 +457,10 @@ def main():
 
         # Validation
         val_loss = 0.0
+        area_val_loss = 0.0
+        extent_val_loss = 0.0
+        solidity_val_loss = 0.0
+        bbox_val_loss = 0.0
         model.eval()
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Epoch {epoch+1} [Val]"):
@@ -469,12 +478,21 @@ def main():
                 loss, loss_dict = compute_aux_loss(
                     area_logits, extent_logits, solidity_logits, bbox_logits,
                     area_targets, extent_targets, solidity_targets, bbox_targets,
-                    K_area=10, K_extent=6, K_solidity=4
+                    K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox
                 )
+                area_val_loss += loss_dict["area_loss"].item()
+                extent_val_loss += loss_dict["extent_loss"].item()
+                solidity_val_loss += loss_dict["solidity_loss"].item()
+                bbox_val_loss += loss_dict["bbox_loss"].item()
+
                 val_loss += loss.item()
 
+        area_val_loss /= len(val_loader)
+        extent_val_loss /= len(val_loader)
+        solidity_val_loss /= len(val_loader)
+        bbox_val_loss /= len(val_loader)
         val_loss /= len(val_loader)
-        logger.info(f"Epoch {epoch+1} - Val Loss: {val_loss:.4f}")
+        logger.info(f"Epoch {epoch+1} - Val Loss: {val_loss:.4f} - Area Loss: {area_val_loss:.4f} - Extent Loss: {extent_val_loss:.4f} - Solidity Loss: {solidity_val_loss:.4f} - BBox Loss: {bbox_val_loss:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
