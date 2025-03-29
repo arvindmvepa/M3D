@@ -182,6 +182,43 @@ def distance_aware_jaccard_loss(
     return 1.0 - jaccard.mean()
 
 
+def mse_loss(logits, labels):
+    """
+    Builds a multi-hot [B, L, 27] then does MSE between
+    sigmoid(logits) and the labels. Returns a scalar.
+    """
+    B, L, Q = logits.shape
+    if Q != 27:
+        raise ValueError(f"Expected 27 quadrants, got Q={Q}.")
+    B_, L_, Q_ = labels.shape
+    if Q_ != 27:
+        raise ValueError(f"(labels) Expected 27 quadrants, got Q={Q_}.")
+
+    # Convert logits -> probabilities
+    probs = torch.sigmoid(logits)  # shape [B, L, 27]
+
+    # Compute standard MSE
+    loss_mse = F.mse_loss(probs, labels)
+    return loss_mse
+
+def bce_loss(logits, labels):
+    """
+    Builds a multi-hot label of shape [B, L, 27] with 1's in the
+    ground-truth quadrants, then does standard BCEWithLogitsLoss.
+    Returns a scalar.
+    """
+    B, L, Q = logits.shape
+    if Q != 27:
+        raise ValueError(f"(logits) Expected 27 quadrants, got Q={Q}.")
+    B_, L_, Q_ = labels.shape
+    if Q_ != 27:
+        raise ValueError(f"(labels) Expected 27 quadrants, got Q={Q_}.")
+
+    # Compute BCE with logits
+    loss_bce = F.binary_cross_entropy_with_logits(logits, labels)
+    return loss_bce
+
+
 def soft_jaccard_loss(bbox_logits, bbox_targets, eps=1e-7):
     """
     bbox_logits: [B,4,Q]  raw
@@ -234,6 +271,10 @@ def compute_aux_loss(
         bbox_loss = distance_aware_jaccard_loss(bbox_logits, bbox_targets, dist_matrix)
     elif bbox_loss == "dist_bce":
         bbox_loss = distance_aware_bce_loss(bbox_logits, bbox_targets)
+    elif bbox_loss == "bce":
+        bbox_loss = bce_loss(bbox_logits, bbox_targets)
+    elif bbox_loss == "mse":
+        bbox_loss = mse_loss(bbox_logits, bbox_targets)
     elif bbox_loss == "jaccard":
         bbox_loss = soft_jaccard_loss(bbox_logits, bbox_targets)
     else:
@@ -540,7 +581,6 @@ def main():
     # -----------------------------------------------------------
     # 4) Training Loop
     # -----------------------------------------------------------
-    """
     for epoch in range(args.num_epochs):
         model.train()
         total_loss = 0.0
@@ -630,7 +670,6 @@ def main():
             logger.info(f"New best val loss = {val_loss:.4f}. Saved model to {best_model_path}")
 
     logger.info("Training complete.")
-    """
 
     # -----------------------------------------------------------
     # 5) Test Evaluation
