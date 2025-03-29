@@ -648,7 +648,7 @@ def main():
     all_extent_tgts  = []
     all_solidity_preds = []
     all_solidity_tgts  = []
-    thresh = [0.99, 0.999, 0.9999, 0.99999, 1.0]
+    thresh = [0.99, 0.999, 0.9999, 0.99999, 1.0, 1.1]
     thresh_iou_list = dict()
 
     with torch.no_grad():
@@ -690,7 +690,7 @@ def main():
             # 4) BBox => IoU
             bbox_prob = torch.sigmoid(bbox_logits)  # shape [B,4,Q], in [0..1]
             for thresh_ in thresh:
-                bbox_pred = (bbox_prob > thresh_).float()  # hard threshold -> 0/1
+                bbox_pred = (bbox_prob >= thresh_).float()  # hard threshold -> 0/1
                 intersection = (bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
                 union = (bbox_pred + bbox_targets - bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
                 iou = (intersection + 1e-7)/ (union + 1e-7)  # [B,4]
