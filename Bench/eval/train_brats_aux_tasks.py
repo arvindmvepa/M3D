@@ -687,7 +687,7 @@ def main():
     all_extent_tgts  = []
     all_solidity_preds = []
     all_solidity_tgts  = []
-    thresh = [0.99, 0.999, 0.9999, 0.99999, 1.0, 1.1]
+    thresh = [0.5, 0.6, 0.7, 0.8, .9, 1.0, 1.1]
     thresh_iou_list = dict()
 
     with torch.no_grad():
