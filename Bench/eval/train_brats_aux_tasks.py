@@ -491,6 +491,7 @@ def main():
     # -----------------------------------------------------------
     # 4) Training Loop
     # -----------------------------------------------------------
+    """
     for epoch in range(args.num_epochs):
         model.train()
         total_loss = 0.0
@@ -580,6 +581,7 @@ def main():
             logger.info(f"New best val loss = {val_loss:.4f}. Saved model to {best_model_path}")
 
     logger.info("Training complete.")
+    """
 
     # -----------------------------------------------------------
     # 5) Test Evaluation
@@ -636,10 +638,11 @@ def main():
             all_solidity_tgts.append(solidity_tgt_1d.cpu())
 
             # 4) BBox => IoU
-            bbox_prob = torch.sigmoid(bbox_logits)  # [B,4,Q]
-            intersection = (bbox_prob * bbox_targets).sum(dim=2)
-            union = (bbox_prob + bbox_targets - bbox_prob*bbox_targets).sum(dim=2)
-            iou = intersection / (union + 1e-7)   # [B,4]
+            bbox_prob = torch.sigmoid(bbox_logits)  # shape [B,4,Q], in [0..1]
+            bbox_pred = (bbox_prob >= 0.5).float()  # hard threshold -> 0/1
+            intersection = (bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
+            union = (bbox_pred + bbox_targets - bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
+            iou = (intersection + 1e-7)/ (union + 1e-7)  # [B,4]
             iou_list.append(iou.cpu())
 
     # stack predictions
