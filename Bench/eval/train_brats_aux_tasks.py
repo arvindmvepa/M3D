@@ -540,6 +540,7 @@ def main():
     # -----------------------------------------------------------
     # 4) Training Loop
     # -----------------------------------------------------------
+    """
     for epoch in range(args.num_epochs):
         model.train()
         total_loss = 0.0
@@ -629,6 +630,7 @@ def main():
             logger.info(f"New best val loss = {val_loss:.4f}. Saved model to {best_model_path}")
 
     logger.info("Training complete.")
+    """
 
     # -----------------------------------------------------------
     # 5) Test Evaluation
@@ -646,7 +648,8 @@ def main():
     all_extent_tgts  = []
     all_solidity_preds = []
     all_solidity_tgts  = []
-    iou_list = []
+    thresh = [0.5, 0.65, 0.80, .90, .95]
+    thresh_iou_list = dict()
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Test"):
@@ -686,11 +689,14 @@ def main():
 
             # 4) BBox => IoU
             bbox_prob = torch.sigmoid(bbox_logits)  # shape [B,4,Q], in [0..1]
-            bbox_pred = (bbox_prob >= 0.5).float()  # hard threshold -> 0/1
-            intersection = (bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
-            union = (bbox_pred + bbox_targets - bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
-            iou = (intersection + 1e-7)/ (union + 1e-7)  # [B,4]
-            iou_list.append(iou.cpu())
+            for thresh_ in thresh:
+                bbox_pred = (bbox_prob >= thresh_).float()  # hard threshold -> 0/1
+                intersection = (bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
+                union = (bbox_pred + bbox_targets - bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
+                iou = (intersection + 1e-7)/ (union + 1e-7)  # [B,4]
+                if thresh_ not in thresh_iou_list:
+                    thresh_iou_list[thresh_] = []
+                thresh_iou_list[thresh_].append(iou.cpu())
 
     # stack predictions
     area_preds = torch.cat(all_area_preds).numpy()
@@ -699,9 +705,10 @@ def main():
     extent_tgts  = torch.cat(all_extent_tgts).numpy()
     solidity_preds = torch.cat(all_solidity_preds).numpy()
     solidity_tgts  = torch.cat(all_solidity_tgts).numpy()
-    iou_tensor = torch.cat(iou_list, dim=0) # shape [N*B, 4]
-    mean_iou = iou_tensor.mean().item()
-
+    thresh_mean_iou = dict()
+    for thresh_ in thresh:
+        iou_tensor = torch.cat(thresh_iou_list[thresh_], dim=0) # shape [N*B, 4]
+        thresh_mean_iou[thresh_] = iou_tensor.mean().item()
     # Simple metrics: Mean Absolute Error for ordinal
     area_mae = mean_absolute_error(area_tgts, area_preds)
     extent_mae = mean_absolute_error(extent_tgts, extent_preds)
@@ -711,7 +718,7 @@ def main():
     logger.info(f"Area MAE:     {area_mae:.4f}")
     logger.info(f"Extent MAE:   {extent_mae:.4f}")
     logger.info(f"Solidity MAE: {solidity_mae:.4f}")
-    logger.info(f"BBox Mean IoU:{mean_iou:.4f}")
+    [logger.info(f"{thresh_} BBox Mean IoU :{thresh_mean_iou[thresh_]:.4f}") for thresh_ in thresh]
     logger.info("Evaluation complete.")
 
 
