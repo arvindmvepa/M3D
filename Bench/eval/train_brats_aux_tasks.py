@@ -762,7 +762,7 @@ def main():
     logger.info(f"Extent MAE:   {extent_mae:.4f}")
     logger.info(f"Solidity MAE: {solidity_mae:.4f}")
     for label_index in range(4):
-        logger.info(f"Label: {labels_order[label_index]}")
+        logger.info(f"Label: {label_index}")
         [logger.info(f"\t{thresh_} BBox Mean IoU :{thresh_mean_iou[label_index][thresh_]:.4f}") for thresh_ in thresh]
     logger.info("Evaluation complete.")
 
