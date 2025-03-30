@@ -687,8 +687,8 @@ def main():
     all_extent_tgts  = []
     all_solidity_preds = []
     all_solidity_tgts  = []
-    thresh = [0.5, 0.6, 0.7, 0.8, .9, 1.0, 1.1]
-    thresh_iou_list = dict()
+    thresh = [-.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, .9, 1.0, 1.1]
+    thresh_iou_list = [dict() for _ in range(4)]
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Test"):
@@ -733,9 +733,10 @@ def main():
                 intersection = (bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
                 union = (bbox_pred + bbox_targets - bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
                 iou = (intersection + 1e-7)/ (union + 1e-7)  # [B,4]
-                if thresh_ not in thresh_iou_list:
-                    thresh_iou_list[thresh_] = []
-                thresh_iou_list[thresh_].append(iou.cpu())
+                if thresh_ not in thresh_iou_list[label_index]:
+                    thresh_iou_list[label_index][thresh_] = []
+                for label_index in range(4):
+                    thresh_iou_list[label_index][thresh_].append(iou.cpu()[:, label_index])
 
     # stack predictions
     area_preds = torch.cat(all_area_preds).numpy()
@@ -744,10 +745,11 @@ def main():
     extent_tgts  = torch.cat(all_extent_tgts).numpy()
     solidity_preds = torch.cat(all_solidity_preds).numpy()
     solidity_tgts  = torch.cat(all_solidity_tgts).numpy()
-    thresh_mean_iou = dict()
-    for thresh_ in thresh:
-        iou_tensor = torch.cat(thresh_iou_list[thresh_], dim=0) # shape [N*B, 4]
-        thresh_mean_iou[thresh_] = iou_tensor.mean().item()
+    thresh_mean_iou = [dict() for _ in range(4)]
+    for label_index in range(4):
+        for thresh_ in thresh:
+            iou_tensor = torch.cat(thresh_iou_list[label_index][thresh_], dim=0) # shape [N*B]
+            thresh_mean_iou[label_index][thresh_] = iou_tensor.mean().item()
     # Simple metrics: Mean Absolute Error for ordinal
     area_mae = mean_absolute_error(area_tgts, area_preds)
     extent_mae = mean_absolute_error(extent_tgts, extent_preds)
@@ -757,7 +759,9 @@ def main():
     logger.info(f"Area MAE:     {area_mae:.4f}")
     logger.info(f"Extent MAE:   {extent_mae:.4f}")
     logger.info(f"Solidity MAE: {solidity_mae:.4f}")
-    [logger.info(f"{thresh_} BBox Mean IoU :{thresh_mean_iou[thresh_]:.4f}") for thresh_ in thresh]
+    for label_index in range(4):
+        logger.info(f"Label: {labels_order[label_index]}")
+        [logger.info(f"\t{thresh_} BBox Mean IoU :{thresh_mean_iou[label_index][thresh_]:.4f}") for thresh_ in thresh]
     logger.info("Evaluation complete.")
 
 
