@@ -581,6 +581,7 @@ def main():
     # -----------------------------------------------------------
     # 4) Training Loop
     # -----------------------------------------------------------
+    """
     for epoch in range(args.num_epochs):
         model.train()
         total_loss = 0.0
@@ -670,6 +671,7 @@ def main():
             logger.info(f"New best val loss = {val_loss:.4f}. Saved model to {best_model_path}")
 
     logger.info("Training complete.")
+    """
 
     # -----------------------------------------------------------
     # 5) Test Evaluation
