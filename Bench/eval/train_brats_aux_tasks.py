@@ -735,9 +735,9 @@ def main():
                 intersection = (bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
                 union = (bbox_pred + bbox_targets - bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
                 iou = (intersection + 1e-7)/ (union + 1e-7)  # [B,4]
-                if thresh_ not in thresh_iou_list[label_index]:
-                    thresh_iou_list[label_index][thresh_] = []
                 for label_index in range(4):
+                    if thresh_ not in thresh_iou_list[label_index]:
+                        thresh_iou_list[label_index][thresh_] = []
                     thresh_iou_list[label_index][thresh_].append(iou.cpu()[:, label_index])
 
     # stack predictions
