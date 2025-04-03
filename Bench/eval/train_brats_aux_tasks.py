@@ -400,7 +400,7 @@ class AuxVisionDataset(Dataset):
             "seg_file": seg_file
         }
 
-    def convert_file_path_to_npy(self, image_abs_pxath):
+    def convert_file_path_to_npy(self, image_abs_path):
         volume_abs_dir = os.path.dirname(image_abs_path)
         base_dir = os.path.dirname(volume_abs_dir)
         new_base_dir = base_dir + "_npy"
