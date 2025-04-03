@@ -400,7 +400,7 @@ class AuxVisionDataset(Dataset):
             "seg_file": seg_file
         }
 
-    def convert_file_path_to_npy(self, image_abs_path):
+    def convert_file_path_to_npy(self, image_abs_pxath):
         volume_abs_dir = os.path.dirname(image_abs_path)
         base_dir = os.path.dirname(volume_abs_dir)
         new_base_dir = base_dir + "_npy"
@@ -420,23 +420,42 @@ class VisionAuxClassifier(nn.Module):
         area_levels=10,    # => produce (area_levels-1) logits
         extent_levels=6,   # => produce (extent_levels-1) logits
         solidity_levels=4, # => produce (solidity_levels-1) logits
-        num_quadrants=27   # for bbox multi-hot
+        num_quadrants=27,   # for bbox multi-hot
+        use_cls=False
     ):
         super().__init__()
         self.vision_tower = vision_tower
-        hidden_dim = 768 * num_modalities * 2048  # example dimension
+        self.use_cls = use_cls
+        if self.use_cls:
+            cls_hidden_dim = 768 * num_modalities
+            non_cls_hidden_dim = 768 * num_modalities * 2048
 
-        # area => [B,4,(area_levels-1)]
-        self.area_head = nn.Linear(hidden_dim, 4 * (area_levels - 1))
+            # area => [B,4,(area_levels-1)]
+            self.area_head = nn.Linear(cls_hidden_dim, 4 * (area_levels - 1))
 
-        # extent => [B,4,(extent_levels-1)]
-        self.extent_head = nn.Linear(hidden_dim, 4 * (extent_levels - 1))
+            # extent => [B,4,(extent_levels-1)]
+            self.extent_head = nn.Linear(cls_hidden_dim, 4 * (extent_levels - 1))
 
-        # solidity => [B,4,(solidity_levels-1)]
-        self.solidity_head = nn.Linear(hidden_dim, 4 * (solidity_levels - 1))
+            # solidity => [B,4,(solidity_levels-1)]
+            self.solidity_head = nn.Linear(cls_hidden_dim, 4 * (solidity_levels - 1))
 
-        # bbox => [B,4,num_quadrants]
-        self.bbox_head = nn.Linear(hidden_dim, 4 * num_quadrants)
+            # bbox => [B,4,num_quadrants]
+            self.bbox_head = nn.Linear(non_cls_hidden_dim, 4 * num_quadrants)
+
+        else:
+            hidden_dim = 768 * num_modalities * 2048
+
+            # area => [B,4,(area_levels-1)]
+            self.area_head = nn.Linear(hidden_dim, 4 * (area_levels - 1))
+
+            # extent => [B,4,(extent_levels-1)]
+            self.extent_head = nn.Linear(hidden_dim, 4 * (extent_levels - 1))
+
+            # solidity => [B,4,(solidity_levels-1)]
+            self.solidity_head = nn.Linear(hidden_dim, 4 * (solidity_levels - 1))
+
+            # bbox => [B,4,num_quadrants]
+            self.bbox_head = nn.Linear(hidden_dim, 4 * num_quadrants)
 
         self.area_levels = area_levels
         self.extent_levels = extent_levels
@@ -451,23 +470,36 @@ class VisionAuxClassifier(nn.Module):
         feats2 = self.vision_tower.forward(mod2)
         feats3 = self.vision_tower.forward(mod3)
         feats4 = self.vision_tower.forward(mod4)
-        feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)  # [B, 768*4]
-        feats = feats.view(B, -1)
 
+        if self.use_cls:
+            # Concatenate cls features and then non-cls features
+            cls_feats = torch.cat([feats1[:, 0], feats2[:, 0], feats3[:, 0], feats4][:, 0], dim=1)
+            cls_feats = cls_feats.view(B, -1)  # [B, 768*4]
+            non_cls_feats = torch.cat([feats1[:, 1:], feats2[:, 1:], feats3[:, 1:], feats4[:, 1:]], dim=1)  # [B, 768*4]
+            non_cls_feats = non_cls_feats.view(B, -1)  # [B, 768*4*2048]
+            area_feats = cls_feats
+            extent_feats = cls_feats
+            solidity_feats = cls_feats
+            bbox_feats = non_cls_feats
+        else:
+            # Concatenate features from all modalities
+            feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)  # [B, 768*4, 2048]
+            feats = feats.view(B, -1)
+            area_feats = feats
+            extent_feats = feats
+            solidity_feats = feats
+            bbox_feats = feats
         # area
-        area_raw = self.area_head(feats)  # [B,4*(K-1)]
+        area_raw = self.area_head(area_feats)  # [B,4*(K-1)]
         area_logits = area_raw.view(B, 4, (self.area_levels - 1))
-
         # extent
-        extent_raw = self.extent_head(feats)
+        extent_raw = self.extent_head(extent_feats)
         extent_logits = extent_raw.view(B, 4, (self.extent_levels - 1))
-
         # solidity
-        solidity_raw = self.solidity_head(feats)
+        solidity_raw = self.solidity_head(solidity_feats)
         solidity_logits = solidity_raw.view(B, 4, (self.solidity_levels - 1))
-
         # bbox
-        bbox_raw = self.bbox_head(feats)  # [B,4*num_quadrants]
+        bbox_raw = self.bbox_head(bbox_feats)  # [B,4*num_quadrants]
         bbox_logits = bbox_raw.view(B, 4, self.num_quadrants)
 
         return area_logits, extent_logits, solidity_logits, bbox_logits
@@ -502,17 +534,18 @@ class VisionTrainingArguments:
     tag: str = ""
     keep_only_bbox: bool = False
     bbox_loss: str = "jaccard"
+    use_cls: bool = False
 
 
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}" + args.tag
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}_use_cls_{args.use_cls}" + args.tag
     os.makedirs(output_dir, exist_ok=True)
     logger = setup_logger(
         log_file=os.path.join(output_dir,
-                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}.log"),
+                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}_use_cls_{args.use_cls}.log"),
         log_to_console=True
     )
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -550,6 +583,10 @@ def main():
             param.requires_grad = False
         logger.info("Vision tower is frozen.")
 
+    if args.use_cls:
+        vision_tower.select_feature = 'cls_patch'
+        logger.info("Using [CLS] token during training.")
+
     # Build the multi-task model
     model = VisionAuxClassifier(
         vision_tower=vision_tower,
@@ -557,7 +594,8 @@ def main():
         area_levels=10,      # e.g. 10 ordinal categories
         extent_levels=6,     # e.g. 6 ordinal categories
         solidity_levels=4,   # e.g. 4 ordinal categories
-        num_quadrants=27     # e.g. 3x3x3 bounding box
+        num_quadrants=27,     # e.g. 3x3x3 bounding box
+        use_cls=args.use_cls
     ).to(device)
 
     # -----------------------------------------------------------
