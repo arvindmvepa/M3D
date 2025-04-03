@@ -479,7 +479,7 @@ class VisionAuxClassifier(nn.Module):
 @dataclass
 class VisionTrainingArguments:
     model_name_or_path: str = field(
-        default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/hf",
+        default="./LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000/hf",
         metadata={"help": "Path or name of the checkpoint that contains the vision tower."}
     )
     model_type: str = field(
@@ -490,7 +490,8 @@ class VisionTrainingArguments:
         default="vit3d",
         metadata={"help": "Which vision tower in the loaded model (e.g. 'vit3d')."}
     )
-    pretrain_vision_model: str = field(default=None, metadata={"help": "Path to pretrained model for ViT."})
+    pretrain_vision_model: str = field(default="/local2/amvepa91/M3D/LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin",
+                                       metadata={"help": "Path to pretrained model for ViT."})
     freeze_vision_tower: bool = field(default=True, metadata={"help": "Whether to freeze vision tower weights."})
 
     batch_size: int = 4
@@ -507,11 +508,11 @@ def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}" + args.tag
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}" + args.tag
     os.makedirs(output_dir, exist_ok=True)
     logger = setup_logger(
         log_file=os.path.join(output_dir,
-                              f"aux_model_name_{os.path.basename(args.model_name_or_path)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}.log"),
+                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}.log"),
         log_to_console=True
     )
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -530,6 +531,7 @@ def main():
         base_model = LamedPhi3ForCausalLM.from_pretrained(args.model_name_or_path)
     else:
         raise ValueError(f"Unknown model_type {args.model_type}.")
+    logger.info(f"Loaded model from {args.model_name_or_path}")
 
     vision_tower = base_model.get_model().get_vision_tower()
     if vision_tower is None:
