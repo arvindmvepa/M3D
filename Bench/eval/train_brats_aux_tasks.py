@@ -473,7 +473,7 @@ class VisionAuxClassifier(nn.Module):
 
         if self.use_cls:
             # Concatenate cls features and then non-cls features
-            cls_feats = torch.cat([[feats1[:, 0], feats2[:, 0], feats3[:, 0], feats4][:, 0]], dim=1)
+            cls_feats = torch.cat([feats1[:, 0], feats2[:, 0], feats3[:, 0], feats4[:, 0]], dim=1)
             cls_feats = cls_feats.view(B, -1)  # [B, 768*4]
             non_cls_feats = torch.cat([feats1[:, 1:], feats2[:, 1:], feats3[:, 1:], feats4[:, 1:]], dim=1)  # [B, 768*4]
             non_cls_feats = non_cls_feats.view(B, -1)  # [B, 768*4*2048]
