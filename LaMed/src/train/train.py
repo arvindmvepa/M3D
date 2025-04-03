@@ -268,6 +268,7 @@ def main():
     local_rank = training_args.local_rank
 
     rank0_print("="*20 + " Tokenizer preparation " + "="*20)
+
     # Load tokenizer from the given path with specified configurations
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
@@ -296,9 +297,24 @@ def main():
     model_args.vocab_size = len(tokenizer)
     rank0_print("seg_token_id: ", model_args.seg_token_id)
     rank0_print("vocab_size: ", model_args.vocab_size)
-
     rank0_print("="*20 + " Model preparation " + "="*20)
-    if model_args.vision_tower is not None:
+    if os.path.exists(model_args.model_name_or_path):
+        print(f"loading existing model {model_args.model_name_or_path}")
+        if 'llama' in model_args.model_name_or_path.lower():
+            model = LamedLlamaForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+        elif 'phi3' in model_args.model_name_or_path.lower():
+            model = LamedPhi3ForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir
+            )
+        else:
+            raise ValueError(f"Unknown Model Type {model_args.model_name_or_path}")
+    elif model_args.vision_tower is not None:
         if 'llama' in model_args.model_type:
             model = LamedLlamaForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
@@ -330,9 +346,9 @@ def main():
         model.gradient_checkpointing_enable()
 
     # initialize vision and seg modules on LLM
-    if model_args.vision_tower is not None:
+    if (model_args.vision_tower is not None) and (not os.path.exists(model_args.model_name_or_path)):
         model.get_model().initialize_vision_modules(model_args=model_args)
-    if model_args.segmentation_module is not None:
+    if (model_args.segmentation_module is not None) and (not os.path.exists(model_args.model_name_or_path)):
         model.get_model().initialize_seg_modules(model_args=model_args)
 
     model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
@@ -341,8 +357,9 @@ def main():
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
 
-    model_args.num_new_tokens = 4
-    model.initialize_vision_tokenizer(model_args, tokenizer)
+    if not os.path.exists(model_args.model_name_or_path):
+        model_args.num_new_tokens = 4
+        model.initialize_vision_tokenizer(model_args, tokenizer)
 
     if model_args.pretrain_mllm:
         ckpt = torch.load(model_args.pretrain_mllm, map_location="cpu")
