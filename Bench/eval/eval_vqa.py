@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 import argparse
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
-from Bench.dataset.multi_dataset import VQADataset
 from Bench.eval.metrics import compute_exact_match, qa_f1_score
 from LaMed.src.dataset.multi_dataset import VQABratsDataset
 # If the model is not from huggingface but local, please uncomment and import the model architecture.
@@ -45,10 +44,10 @@ def parse_args(args=None):
 
     # data
     parser.add_argument('--data_root', type=str, default="./Data/data")
-    parser.add_argument('--vqa_data_test_path', type=str, default="./Data/data/M3D-VQA/M3D_VQA_test.csv")
+    parser.add_argument('--vqa_data_test_path', type=str, default="/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json")
     parser.add_argument('--output_dir', type=str, default="./LaMed/output/LaMed-Phi3-4B-finetune-0000/eval_vqa/")
 
-    parser.add_argument('--proj_out_num', type=int, default=256)
+    parser.add_argument('--proj_out_num', type=int, default=1024)
 
     return parser.parse_args(args)
 
@@ -143,17 +142,29 @@ def main():
 
             result["accuracy"] = compute_exact_match(decoded_preds, decoded_labels)
 
-            bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
+            try:
+                bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels, max_order=1)
+            except:
+                bleu_score = {'bleu': np.nan}
             result["bleu"] = bleu_score['bleu']
 
-            rouge_score = rouge.compute(predictions=decoded_preds, references=decoded_labels, rouge_types=['rouge1'])
+            try:
+                rouge_score = rouge.compute(predictions=decoded_preds, references=decoded_labels, rouge_types=['rouge1'])
+            except:
+                rouge_score = {'rouge1': np.nan}
             result["rouge1"] = rouge_score['rouge1']
 
-            meteor_score = meteor.compute(predictions=decoded_preds, references=decoded_labels)
+            try:
+                meteor_score = meteor.compute(predictions=decoded_preds, references=decoded_labels)
+            except:
+                meteor_score = {'meteor': np.nan}
             result["meteor"] = meteor_score['meteor']
 
-            bert_score = bertscore.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
-            result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
+            try:
+                bert_score = bertscore.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
+                result["bert_f1"] = sum(bert_score['f1']) / len(bert_score['f1'])
+            except:
+                result["bert_f1"] = np.nan
 
             writer.writerow(
                 [question_type, question, answer[0], generated_texts[0], result["accuracy"], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])

@@ -48,6 +48,8 @@ class LamedMetaModel:
         self.config.vision_select_feature = model_args.vision_select_feature
 
         self.config.mm_projector_type = model_args.mm_projector_type
+        self.config.multimodal = model_args.multimodal
+        self.config.combined_projector = model_args.combined_projector
         self.config.proj_layer_type = model_args.proj_layer_type
         self.config.proj_layer_num = model_args.proj_layer_num
         self.config.proj_pooling_type = model_args.proj_pooling_type
@@ -112,20 +114,31 @@ class LamedMetaForCausalLM(ABC):
     def get_vision_tower(self):
         return self.get_model().get_vision_tower()
 
-    def encode_images(self, images):
-        image_features = self.get_model().get_vision_tower()(images)
-        image_features = self.get_model().mm_projector(image_features)
+    def encode_images(self, images, combined_projector=True):
+        image_features = []
+        if combined_projector:
+            for index in range(4):
+                image_features_ = self.get_model().get_vision_tower()(images[:, index])
+                image_features_ = self.get_model().mm_projector(image_features_)
+                image_features.append(image_features_)
+            image_features = torch.cat(image_features, dim=1)
+        if not combined_projector:
+            for index in range(4):
+                image_features_ = self.get_model().get_vision_tower()(images[:, index])
+                image_features.append(image_features_)
+            image_features = torch.cat(image_features, dim=1)
+            image_features = self.get_model().mm_projector(image_features)
         return image_features
 
     def prepare_inputs_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
-        images,
+        images, combined_projector
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
         else:
-            image_features = self.encode_images(images)
+            image_features = self.encode_images(images, combined_projector=combined_projector)
             inputs_embeds = self.get_model().embed_tokens(input_ids)
             inputs_embeds = torch.cat(
                 (inputs_embeds[:, :1, :], image_features, inputs_embeds[:, (image_features.shape[1] + 1):, :]), dim=1)

@@ -138,7 +138,7 @@ class ViT3DTower(nn.Module):
 
         self.vision_tower = ViT(
             in_channels=self.config.image_channel,
-            img_size=self.config.image_size,
+            img_size=self.config.image_size, # manually set to 1/4 of the original size to consider all modalities
             patch_size=self.config.patch_size,
             pos_embed="perceptron",
             spatial_dims=len(self.config.patch_size),
@@ -157,7 +157,7 @@ class ViT3DTower(nn.Module):
         if self.select_feature == 'patch':
             image_features = image_features[:, 1:]
         elif self.select_feature == 'cls_patch':
-            image_features = image_features
+            image_features = image_features[:, 0]
         else:
             raise ValueError(f'Unexpected select feature: {self.select_feature}')
 

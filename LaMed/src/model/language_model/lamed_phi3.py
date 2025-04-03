@@ -15,6 +15,11 @@ from ..lamed_arch import LamedMetaModel, LamedMetaForCausalLM
 class LamedPhi3Config(Phi3Config):
     model_type = "lamed_phi3"
 
+    def __init__(self, multimodal=True, combined_projector=False, **kwargs):
+        super().__init__(**kwargs)
+        self.multimodal = multimodal
+        self.combined_projector = combined_projector
+
 
 class LamedPhi3Model(LamedMetaModel, Phi3Model):
     config_class = LamedPhi3Config
@@ -73,6 +78,7 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
                 past_key_values,
                 labels,
                 images,
+                combined_projector=self.config.combined_projector
             )
 
         try:
@@ -172,6 +178,7 @@ class LamedPhi3ForCausalLM(LamedMetaForCausalLM, Phi3ForCausalLM):
                 None,
                 None,
                 images,
+                combined_projector=self.config.combined_projector
             )
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)

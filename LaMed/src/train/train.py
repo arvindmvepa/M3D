@@ -43,6 +43,8 @@ class ModelArguments:
 
     # projector
     mm_projector_type: Optional[str] = field(default='spp', metadata={"help": "spp"})
+    multimodal: bool = field(default=True, metadata={"help": "multimodal"})
+    combined_projector: bool = field(default=False, metadata={"help": "combined_projector"})
     proj_layer_type: str = field(default="mlp", metadata={"help": "Type of layer in projector. options: [linear, mlp]."})
     proj_layer_num: int = field(default=2, metadata={"help": "Number of layers in projector."})
     proj_pooling_type: str = field(default="spatial", metadata={"help": "Type of pooling in projector. options: [spatial, sequence]."})
@@ -87,7 +89,7 @@ class TrainingArguments(transformers.TrainingArguments):
     cache_dir: Optional[str] = field(default=None)
     remove_unused_columns: bool = field(default=False)
     model_max_length: int = field(
-        default=512, #512
+        default=1280, #512
         metadata={
             "help":
             "Maximum sequence length. Sequences will be right padded (and possibly truncated)."
@@ -375,8 +377,12 @@ def main():
 
     rank0_print("="*20 + " Dataset preparation " + "="*20)
     data_args.max_length = training_args.model_max_length
-    data_args.proj_out_num = model.get_model().mm_projector.proj_out_num
-    rank0_print("vision tokens output from projector: ", data_args.proj_out_num)
+    if model_args.combined_projector:
+        data_args.proj_out_num = model.get_model().mm_projector.proj_out_num * 4
+        rank0_print("vision tokens output from projector (combined projector): ", data_args.proj_out_num)
+    else:
+        data_args.proj_out_num = model.get_model().mm_projector.proj_out_num
+        rank0_print("vision tokens output from projector: ", data_args.proj_out_num)
     data_args.seg_enable = hasattr(model.get_model(), "seg_module")
 
     if model_args.tune_mm_mlp_adapter:
