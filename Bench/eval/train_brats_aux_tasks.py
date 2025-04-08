@@ -527,14 +527,14 @@ class VisionTrainingArguments:
     freeze_vision_tower: bool = field(default=True, metadata={"help": "Whether to freeze vision tower weights."})
 
     batch_size: int = 4
-    num_epochs: int = 5
+    num_epochs: int = 50
     learning_rate: float = 1e-4
     output_dir: str = "./vision_aux_output"
     device: str = "cuda"
     tag: str = ""
     keep_only_bbox: bool = False
-    bbox_loss: str = "jaccard"
-    use_cls: bool = False
+    bbox_loss: str = "bce"
+    use_cls: bool = True
 
 
 def main():
