@@ -15,6 +15,7 @@ from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
+import random
 
 from monai.networks.blocks.patchembedding import PatchEmbeddingBlock
 from monai.networks.blocks.transformerblock import TransformerBlock
@@ -129,6 +130,105 @@ class ViT(nn.Module):
 
 
 
+# class ViT3DTower(nn.Module):
+#     def __init__(self, config):
+#         super().__init__()
+#         self.config = config
+#         self.select_layer = config.vision_select_layer
+#         self.select_feature = config.vision_select_feature
+
+#         self.vision_tower = ViT(
+#             in_channels=self.config.image_channel,
+#             img_size=self.config.image_size, # manually set to 1/4 of the original size to consider all modalities
+#             patch_size=self.config.patch_size,
+#             pos_embed="perceptron",
+#             spatial_dims=len(self.config.patch_size),
+#             classification=True,
+#         )
+
+#     def forward(self, images):
+#         last_feature, hidden_states = self.vision_tower(images)
+#         if self.select_layer == -1:
+#             image_features = last_feature
+#         elif self.select_layer < -1:
+#             image_features = hidden_states[self.select_feature]
+#         else:
+#             raise ValueError(f'Unexpected select layer: {self.select_layer}')
+
+#         if self.select_feature == 'patch':
+#             image_features = image_features[:, 1:]
+#         elif self.select_feature == 'cls_patch':
+#             image_features = image_features
+#         else:
+#             raise ValueError(f'Unexpected select feature: {self.select_feature}')
+
+#         return image_features
+
+#     @property
+#     def dtype(self):
+#         return self.vision_tower.dtype
+
+#     @property
+#     def device(self):
+#         return self.vision_tower.device
+
+#     @property
+#     def hidden_size(self):
+#         return self.vision_tower.hidden_size
+
+
+
+
+class VisionReconstructionDecoder(nn.Module):
+    """Decoder for reconstruction self-supervised learning task."""
+    def __init__(self, hidden_size=768, patch_size=(16, 16, 16), image_size=(128, 128, 128)):
+        super().__init__()
+        self.hidden_size = hidden_size
+        
+        # Convert lists to tuples if needed
+        if isinstance(patch_size, list):
+            patch_size = tuple(patch_size)
+        if isinstance(image_size, list):
+            image_size = tuple(image_size)
+            
+        self.patch_size = patch_size if isinstance(patch_size, tuple) else (patch_size, patch_size, patch_size)
+        self.image_size = image_size if isinstance(image_size, tuple) else (image_size, image_size, image_size)
+        
+        # Now extract values as integers for calculation
+        p_d, p_h, p_w = self.patch_size
+        i_d, i_h, i_w = self.image_size
+        
+        # Calculate number of patches for each dimension
+        self.num_patches_d = i_d // p_d
+        self.num_patches_h = i_h // p_h
+        self.num_patches_w = i_w // p_w
+        self.num_patches = self.num_patches_d * self.num_patches_h * self.num_patches_w
+        
+        # Calculate patch volume
+        self.patch_volume = p_d * p_h * p_w
+        
+        # Decoder layers
+        self.decoder = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size * 2),
+            nn.GELU(),
+            nn.Linear(hidden_size * 2, hidden_size * 4),
+            nn.GELU(),
+            nn.Linear(hidden_size * 4, self.patch_volume)  # Reconstruct patch
+        )
+    
+    def forward(self, x):
+        """
+        Args:
+            x: Token embeddings from ViT [B, num_patches, hidden_size]
+        Returns:
+            Reconstructed patches [B, num_patches, patch_volume]
+        """
+        # x has shape [B, num_patches, hidden_size]
+        B = x.shape[0]
+        reconstructed_patches = self.decoder(x)  # [B, num_patches, patch_volume]
+        return reconstructed_patches
+
+
 class ViT3DTower(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -136,32 +236,98 @@ class ViT3DTower(nn.Module):
         self.select_layer = config.vision_select_layer
         self.select_feature = config.vision_select_feature
 
+        # Main ViT encoder
         self.vision_tower = ViT(
             in_channels=self.config.image_channel,
-            img_size=self.config.image_size, # manually set to 1/4 of the original size to consider all modalities
+            img_size=self.config.image_size,
             patch_size=self.config.patch_size,
             pos_embed="perceptron",
             spatial_dims=len(self.config.patch_size),
             classification=True,
         )
+        
+        # Reconstruction decoder
+        self.decoder = VisionReconstructionDecoder(
+            hidden_size=768,  # Match hidden_size from ViT
+            patch_size=self.config.patch_size,
+            image_size=self.config.image_size
+        )
+        
+        # Parameters for masking
+        self.mask_ratio = getattr(config, 'mask_ratio', 0.3)  # Default to 30% masking
 
-    def forward(self, images):
+    def apply_random_mask(self, features, mask_ratio=None):
+        """Apply random masking to features
+        Args:
+            features: [B, N, D] where N is num_patches+1 ([CLS] token included)
+            mask_ratio: Ratio of patches to mask
+        """
+        if mask_ratio is None:
+            mask_ratio = self.mask_ratio
+            
+        B, N, D = features.shape
+        
+        # Don't mask the cls token (first token)
+        cls_token = features[:, 0:1, :]
+        patch_tokens = features[:, 1:, :]
+        
+        L = patch_tokens.shape[1]  # Number of patches
+        num_mask = int(L * mask_ratio)
+        
+        # Create random mask indices for each batch
+        mask_indices = []
+        for _ in range(B):
+            # Random indices of patches to mask
+            mask_idx = random.sample(range(L), num_mask)
+            mask_indices.append(mask_idx)
+            
+        # Create mask tensor (1 = keep, 0 = mask)
+        mask = torch.ones(B, L, device=features.device)
+        for b in range(B):
+            mask[b, mask_indices[b]] = 0
+            
+        # Apply mask: replace masked tokens with zeros
+        masked_patch_tokens = patch_tokens * mask.unsqueeze(-1)
+        
+        # Reconstruct original shape with cls token
+        masked_features = torch.cat([cls_token, masked_patch_tokens], dim=1)
+        
+        return masked_features, mask, mask_indices
+
+    def forward(self, images, apply_mask=False):
+        # Get features from vision tower
         last_feature, hidden_states = self.vision_tower(images)
+        
         if self.select_layer == -1:
             image_features = last_feature
         elif self.select_layer < -1:
             image_features = hidden_states[self.select_feature]
         else:
             raise ValueError(f'Unexpected select layer: {self.select_layer}')
-
-        if self.select_feature == 'patch':
-            image_features = image_features[:, 1:]
-        elif self.select_feature == 'cls_patch':
-            image_features = image_features
+            
+        if apply_mask:
+            # Apply masking for reconstruction task
+            masked_features, mask, mask_indices = self.apply_random_mask(image_features)
+            
+            # Extract patch tokens (excluding cls token)
+            patch_tokens = masked_features[:, 1:, :]
+            
+            # Generate reconstructed patches
+            reconstructed_patches = self.decoder(patch_tokens)
+            
+            return image_features, masked_features, reconstructed_patches, mask, mask_indices
         else:
-            raise ValueError(f'Unexpected select feature: {self.select_feature}')
+            # Normal forward pass without reconstruction
+            if self.select_feature == 'patch':
+                image_features = image_features[:, 1:]
+            elif self.select_feature == 'cls_patch':
+                image_features = image_features
+            else:
+                raise ValueError(f'Unexpected select feature: {self.select_feature}')
+                
+            return image_features
 
-        return image_features
+
 
     @property
     def dtype(self):
