@@ -227,8 +227,6 @@ class VisionReconstructionDecoder(nn.Module):
         B = x.shape[0]
         reconstructed_patches = self.decoder(x)  # [B, num_patches, patch_volume]
         return reconstructed_patches
-
-
 class ViT3DTower(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -246,7 +244,7 @@ class ViT3DTower(nn.Module):
             classification=True,
         )
         
-        # Reconstruction decoder
+        # Reconstruction decoder (shared across all modalities)
         self.decoder = VisionReconstructionDecoder(
             hidden_size=768,  # Match hidden_size from ViT
             patch_size=self.config.patch_size,
@@ -255,59 +253,84 @@ class ViT3DTower(nn.Module):
         
         # Parameters for masking
         self.mask_ratio = getattr(config, 'mask_ratio', 0.3)  # Default to 30% masking
+        self.patch_size = getattr(config, 'patch_size', (16, 16, 16))
+
+    def extract_image_patches(self, images):
+        """
+        Extract patches from original images - integrated into the class
+        Args:
+            images: [B, C, D, H, W]
+        Returns:
+            patches: [B, num_patches, C*pd*ph*pw] where num_patches is the total number of patches
+        """
+        B, C, D, H, W = images.shape
+        pd, ph, pw = self.patch_size
+        
+        # Number of patches in each dimension
+        nd, nh, nw = D // pd, H // ph, W // pw
+        
+        # Reshape to extract patches
+        patches = images.unfold(2, pd, pd).unfold(3, ph, ph).unfold(4, pw, pw)
+        patches = patches.contiguous().view(B, C, nd, nh, nw, pd, ph, pw)
+        patches = patches.permute(0, 2, 3, 4, 1, 5, 6, 7).contiguous()
+        patches = patches.view(B, nd*nh*nw, C*pd*ph*pw)
+        
+        return patches
 
     def apply_random_mask(self, features, mask_ratio=None):
-        """Apply random masking to features
-        Args:
-            features: [B, N, D] where N is num_patches+1 ([CLS] token included)
-            mask_ratio: Ratio of patches to mask
-        """
         if mask_ratio is None:
             mask_ratio = self.mask_ratio
-            
         B, N, D = features.shape
-        
         # Don't mask the cls token (first token)
         cls_token = features[:, 0:1, :]
         patch_tokens = features[:, 1:, :]
-        
         L = patch_tokens.shape[1]  # Number of patches
         num_mask = int(L * mask_ratio)
         
-        # Create random mask indices for each batch
-        mask_indices = []
-        for _ in range(B):
-            # Random indices of patches to mask
-            mask_idx = random.sample(range(L), num_mask)
-            mask_indices.append(mask_idx)
-            
-        # Create mask tensor (1 = keep, 0 = mask)
+        # Create masks and indices for all batches at once
         mask = torch.ones(B, L, device=features.device)
-        for b in range(B):
-            mask[b, mask_indices[b]] = 0
-            
-        # Apply mask: replace masked tokens with zeros
-        masked_patch_tokens = patch_tokens * mask.unsqueeze(-1)
+        mask_indices = []
         
+        for b in range(B):
+            # More efficient random indices generation
+            perm = torch.randperm(L, device=features.device)
+            idx = perm[:num_mask]
+            mask_indices.append(idx)
+            mask[b, idx] = 0
+            
+        # Apply mask with broadcasting
+        masked_patch_tokens = patch_tokens * mask.unsqueeze(-1)
         # Reconstruct original shape with cls token
         masked_features = torch.cat([cls_token, masked_patch_tokens], dim=1)
         
         return masked_features, mask, mask_indices
 
-    def forward(self, images, apply_mask=False):
+    def process_single_modality(self, image, apply_mask=False):
+        """Process a single modality
+        Args:
+            image: Input image [B, C, D, H, W]
+            apply_mask: Whether to apply masking
+        Returns:
+            dict containing all needed outputs including features, patches, etc.
+        """
+        # Extract raw image patches first (for reconstruction targets)
+        original_patches = None
+        if apply_mask:
+            original_patches = self.extract_image_patches(image)
+        
         # Get features from vision tower
-        last_feature, hidden_states = self.vision_tower(images)
+        image_features, hidden_states = self.vision_tower(image)
         
         if self.select_layer == -1:
-            image_features = last_feature
+            selected_features = image_features
         elif self.select_layer < -1:
-            image_features = hidden_states[self.select_feature]
+            selected_features = hidden_states[self.select_feature]
         else:
             raise ValueError(f'Unexpected select layer: {self.select_layer}')
             
         if apply_mask:
             # Apply masking for reconstruction task
-            masked_features, mask, mask_indices = self.apply_random_mask(image_features)
+            masked_features, mask, mask_indices = self.apply_random_mask(selected_features)
             
             # Extract patch tokens (excluding cls token)
             patch_tokens = masked_features[:, 1:, :]
@@ -315,20 +338,87 @@ class ViT3DTower(nn.Module):
             # Generate reconstructed patches
             reconstructed_patches = self.decoder(patch_tokens)
             
-            return image_features, masked_features, reconstructed_patches, mask, mask_indices
+            return {
+                'features': selected_features,
+                'masked_features': masked_features,
+                'original_patches': original_patches,
+                'reconstructed_patches': reconstructed_patches,
+                'mask': mask,
+                'mask_indices': mask_indices
+            }
         else:
             # Normal forward pass without reconstruction
             if self.select_feature == 'patch':
-                image_features = image_features[:, 1:]
+                selected_features = selected_features[:, 1:]
             elif self.select_feature == 'cls_patch':
-                image_features = image_features
+                selected_features = selected_features
             else:
                 raise ValueError(f'Unexpected select feature: {self.select_feature}')
                 
-            return image_features
+            return selected_features
 
-
-
+    def forward(self, images, apply_mask=False, multimodal=False, mod2=None, mod3=None, mod4=None):
+        """Unified forward method with support for both single and multiple modalities
+        
+        Args:
+            images: Input image(s) [B, C, D, H, W] (first modality or single modality)
+            apply_mask: Whether to apply masking for reconstruction
+            multimodal: Whether this is a multimodal forward pass
+            mod2, mod3, mod4: Additional modalities when multimodal=True
+            
+        Returns:
+            For single modality with apply_mask=False:
+                Features tensor [B, N, D]
+            For single modality with apply_mask=True:
+                Dictionary with features, masked_features, etc.
+            For multimodal with apply_mask=True:
+                Dictionary with features, reconstructions, etc. for all modalities
+        """
+        # Single modality case
+        if not multimodal:
+            return self.process_single_modality(images, apply_mask=apply_mask)
+        
+        # Multimodal case - requires all 4 modalities
+        if mod2 is None or mod3 is None or mod4 is None:
+            raise ValueError("All 4 modalities must be provided when multimodal=True")
+            
+        mod1 = images  # First modality is passed as 'images'
+        
+        # Process each modality
+        if apply_mask:
+            # Apply masking to all modalities
+            mod1_results = self.process_single_modality(mod1, apply_mask=True)
+            mod2_results = self.process_single_modality(mod2, apply_mask=True)
+            mod3_results = self.process_single_modality(mod3, apply_mask=True)
+            mod4_results = self.process_single_modality(mod4, apply_mask=True)
+            
+            results = {
+                'features': [mod1_results['features'], mod2_results['features'], 
+                            mod3_results['features'], mod4_results['features']],
+                'masked_features': [mod1_results['masked_features'], mod2_results['masked_features'], 
+                                   mod3_results['masked_features'], mod4_results['masked_features']],
+                'original_patches': [mod1_results['original_patches'], mod2_results['original_patches'], 
+                                    mod3_results['original_patches'], mod4_results['original_patches']],
+                'reconstructed': [mod1_results['reconstructed_patches'], mod2_results['reconstructed_patches'], 
+                                 mod3_results['reconstructed_patches'], mod4_results['reconstructed_patches']],
+                'masks': [mod1_results['mask'], mod2_results['mask'], 
+                         mod3_results['mask'], mod4_results['mask']],
+                'mask_indices': [mod1_results['mask_indices'], mod2_results['mask_indices'], 
+                                mod3_results['mask_indices'], mod4_results['mask_indices']]
+            }
+        else:
+            # Standard forward pass without masking
+            features1 = self.process_single_modality(mod1, apply_mask=False)
+            features2 = self.process_single_modality(mod2, apply_mask=False)
+            features3 = self.process_single_modality(mod3, apply_mask=False)
+            features4 = self.process_single_modality(mod4, apply_mask=False)
+            
+            results = {
+                'features': [features1, features2, features3, features4]
+            }
+            
+        return results
+        
     @property
     def dtype(self):
         return self.vision_tower.dtype

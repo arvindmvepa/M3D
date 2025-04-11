@@ -424,11 +424,29 @@ class VisionAuxClassifier(nn.Module):
         extent_levels=6,   # => produce (extent_levels-1) logits
         solidity_levels=4, # => produce (solidity_levels-1) logits
         num_quadrants=27,   # for bbox multi-hot
-        use_cls=False
+        use_cls=False,
+        modality_weights=None,  # Optional weights for each modality in reconstruction
+        cross_modality_matrix=None  # Optional matrix for cross-modality reconstruction
     ):
         super().__init__()
         self.vision_tower = vision_tower
         self.use_cls = use_cls
+        self.num_modalities = num_modalities
+        
+        # Set up modality weights for reconstruction loss
+        self.modality_weights = modality_weights
+        if self.modality_weights is None:
+            self.modality_weights = [1.0] * num_modalities
+            
+        # Set up cross-modality reconstruction matrix
+        self.cross_modality_matrix = cross_modality_matrix
+        if self.cross_modality_matrix is None:
+            # Default: allow all cross-modality reconstructions with equal weight
+            self.cross_modality_matrix = torch.ones((num_modalities, num_modalities))
+            # Set diagonal to zero to exclude self-reconstruction (handled separately)
+            for i in range(num_modalities):
+                self.cross_modality_matrix[i, i] = 0.0
+            
         if self.use_cls:
             cls_hidden_dim = 768 * num_modalities
             non_cls_hidden_dim = 768 * num_modalities * 2048
@@ -465,23 +483,47 @@ class VisionAuxClassifier(nn.Module):
         self.solidity_levels = solidity_levels
         self.num_quadrants = num_quadrants
 
-    def forward(self, mod1, mod2, mod3, mod4, use_masked_features=False, masked_features=None):
+    def forward(self, mod1, mod2, mod3, mod4, use_recon=False):
+        """Unified forward method for both classification and reconstruction tasks
+        
+        Args:
+            mod1, mod2, mod3, mod4: Input images for different modalities [B, C, D, H, W]
+            use_recon: Whether to use reconstruction (masking)
+            
+        Returns:
+            If use_recon=False:
+                area_logits, extent_logits, solidity_logits, bbox_logits
+            If use_recon=True:
+                Dictionary with classification and reconstruction outputs
+        """
         B = mod1.size(0)
-
-        # Extract features from each modality
-        if use_masked_features and masked_features is not None:
-            feats1 = masked_features
+        
+        if use_recon:
+            # Get multimodal features with masking
+            multimodal_outputs = self.vision_tower(
+                mod1, apply_mask=True, multimodal=True, mod2=mod2, mod3=mod3, mod4=mod4
+            )
+            
+            # Extract features for classification
+            masked_features_list = multimodal_outputs['masked_features']
+            
+            # Use masked features for forward pass
+            feats1 = masked_features_list[0]
+            feats2 = masked_features_list[1]
+            feats3 = masked_features_list[2]
+            feats4 = masked_features_list[3]
         else:
-            feats1 = self.vision_tower.forward(mod1)
-        feats2 = self.vision_tower.forward(mod2)
-        feats3 = self.vision_tower.forward(mod3)
-        feats4 = self.vision_tower.forward(mod4)
-
+            # Standard forward pass without masking
+            feats1 = self.vision_tower(mod1)
+            feats2 = self.vision_tower(mod2)
+            feats3 = self.vision_tower(mod3)
+            feats4 = self.vision_tower(mod4)
+        
         if self.use_cls:
             # Concatenate cls features and then non-cls features
             cls_feats = torch.cat([feats1[:, 0], feats2[:, 0], feats3[:, 0], feats4[:, 0]], dim=1)
             cls_feats = cls_feats.view(B, -1)  # [B, 768*4]
-            non_cls_feats = torch.cat([feats1[:, 1:], feats2[:, 1:], feats3[:, 1:], feats4[:, 1:]], dim=1)  # [B, 768*4]
+            non_cls_feats = torch.cat([feats1[:, 1:], feats2[:, 1:], feats3[:, 1:], feats4[:, 1:]], dim=1)
             non_cls_feats = non_cls_feats.view(B, -1)  # [B, 768*4*2048]
             area_feats = cls_feats
             extent_feats = cls_feats
@@ -489,80 +531,46 @@ class VisionAuxClassifier(nn.Module):
             bbox_feats = non_cls_feats
         else:
             # Concatenate features from all modalities
-            feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)  # [B, 768*4, 2048]
+            feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)
             feats = feats.view(B, -1)
             area_feats = feats
             extent_feats = feats
             solidity_feats = feats
             bbox_feats = feats
-        # area
-        area_raw = self.area_head(area_feats)  # [B,4*(K-1)]
+            
+        # Compute classification logits
+        area_raw = self.area_head(area_feats)
         area_logits = area_raw.view(B, 4, (self.area_levels - 1))
-        # extent
+        
         extent_raw = self.extent_head(extent_feats)
         extent_logits = extent_raw.view(B, 4, (self.extent_levels - 1))
-        # solidity
+        
         solidity_raw = self.solidity_head(solidity_feats)
         solidity_logits = solidity_raw.view(B, 4, (self.solidity_levels - 1))
-        # bbox
-        bbox_raw = self.bbox_head(bbox_feats)  # [B,4*num_quadrants]
-        bbox_logits = bbox_raw.view(B, 4, self.num_quadrants)
-
-        return area_logits, extent_logits, solidity_logits, bbox_logits
-
-
-
-def compute_reconstruction_loss(original_patches, reconstructed_patches, mask_indices, reduction='mean'):
-    """
-    Compute reconstruction loss only for masked patches
-    Args:
-        original_patches: Original image patches [B, num_patches, patch_volume]
-        reconstructed_patches: Reconstructed patches [B, num_patches, patch_volume]
-        mask_indices: List of indices that were masked for each batch
-        reduction: 'mean' or 'sum'
-    """
-    B = original_patches.shape[0]
-    loss = 0
-    
-    for b in range(B):
-        # Extract only the masked patches that need to be reconstructed
-        masked_idx = mask_indices[b]
-        target = original_patches[b, masked_idx]
-        pred = reconstructed_patches[b, masked_idx]
         
-        # Compute MSE loss for this batch
-        batch_loss = F.mse_loss(pred, target, reduction=reduction)
-        loss += batch_loss
-    
-    if reduction == 'mean':
-        return loss / B
-    return loss
-
-# Function to extract patches from original images
-def extract_image_patches(images, patch_size):
-    """
-    Extract patches from original images
-    Args:
-        images: [B, C, D, H, W]
-        patch_size: Tuple (pd, ph, pw)
-    Returns:
-        patches: [B, N, C*pd*ph*pw] where N is number of patches
-    """
-    B, C, D, H, W = images.shape
-    pd, ph, pw = patch_size
-    
-    # Number of patches in each dimension
-    nd, nh, nw = D // pd, H // ph, W // pw
-    
-    # Reshape to extract patches
-    patches = images.unfold(2, pd, pd).unfold(3, ph, ph).unfold(4, pw, pw)
-    patches = patches.contiguous().view(B, C, nd, nh, nw, pd, ph, pw)
-    patches = patches.permute(0, 2, 3, 4, 1, 5, 6, 7).contiguous()
-    patches = patches.view(B, nd*nh*nw, C*pd*ph*pw)
-    
-    return patches
-
-
+        bbox_raw = self.bbox_head(bbox_feats)
+        bbox_logits = bbox_raw.view(B, 4, self.num_quadrants)
+        
+        if use_recon:
+            # Return both classification and reconstruction outputs
+            results = {
+                'classification': {
+                    'area_logits': area_logits,
+                    'extent_logits': extent_logits,
+                    'solidity_logits': solidity_logits,
+                    'bbox_logits': bbox_logits
+                },
+                'reconstruction': {
+                    'original_patches_list': multimodal_outputs['original_patches'],
+                    'reconstructed_patches_list': multimodal_outputs['reconstructed'],
+                    'mask_indices_list': multimodal_outputs['mask_indices'],
+                    'masks': multimodal_outputs['masks']
+                }
+            }
+            return results
+        else:
+            # Return only classification outputs
+            return area_logits, extent_logits, solidity_logits, bbox_logits
 
 
 # -------------------------------------------------------------------------
@@ -600,8 +608,166 @@ class VisionTrainingArguments:
     enable_reconstruction: bool = field(default=True, metadata={"help": "Whether to enable reconstruction task"})
     reconstruction_weight: float = field(default=0.5, metadata={"help": "Weight for reconstruction loss"})
     mask_ratio: float = field(default=0.3, metadata={"help": "Ratio of patches to mask for reconstruction"})
+    
+def compute_cross_modality_reconstruction_loss(
+    original_patches_list,  # List of [B, num_patches, patch_volume] for each modality
+    reconstructed_patches_list,  # List of [B, num_patches, patch_volume] for each modality
+    mask_indices_list,  # List of mask indices for each modality
+    modality_weights=None,  # Optional weights for each modality
+    cross_modality_matrix=None,  # Optional matrix for cross-modality weights
+    reduction='mean'
+):
+    """
+    Compute reconstruction loss across modalities
+    
+    Args:
+        original_patches_list: List of original image patches for each modality
+                              [B, num_patches, patch_volume]
+        reconstructed_patches_list: List of reconstructed patches for each modality
+                                  [B, num_patches, patch_volume]
+        mask_indices_list: List of indices that were masked for each batch and modality
+        modality_weights: Optional list of weights for each modality
+        cross_modality_matrix: Optional NxN matrix specifying weights for cross-modality reconstruction
+                              where N is the number of modalities
+        reduction: 'mean' or 'sum'
+    
+    Returns:
+        total_loss: Total reconstruction loss
+        loss_dict: Dictionary containing individual loss components
+    """
+    import torch
+    import torch.nn.functional as F
+    
+    if modality_weights is None:
+        # Equal weighting for all modalities by default
+        modality_weights = [1.0] * len(original_patches_list)
+        
+    if cross_modality_matrix is None:
+        # Default cross-modality matrix: allow all cross-modality reconstructions with equal weight
+        num_modalities = len(original_patches_list)
+        cross_modality_matrix = torch.ones((num_modalities, num_modalities))
+        # Set diagonal to zero to exclude self-reconstruction (handled separately)
+        for i in range(num_modalities):
+            cross_modality_matrix[i][i] = 0.0
 
+        cross_modality_matrix[0, 1] = 1.5  # T1c -> T1n (higher weight)
+        cross_modality_matrix[1, 0] = 1.5  # T1n -> T1c (higher weight)
+        cross_modality_matrix[2, 3] = 1.5  # T2f -> T2w (higher weight)
+        cross_modality_matrix[3, 2] = 1.5  # T2w -> T2f (higher weight)
+        
+    B = original_patches_list[0].shape[0]
+    num_modalities = len(original_patches_list)
+    
+    # Dictionary to store individual loss components
+    loss_dict = {
+        'self_reconstruction': 0.0,
+        'cross_reconstruction': 0.0
+    }
+    
+    # Individual modality losses (self-reconstruction)
+    individual_losses = []
+    for mod_idx in range(num_modalities):
+        original = original_patches_list[mod_idx]
+        reconstructed = reconstructed_patches_list[mod_idx]
+        mask_indices = mask_indices_list[mod_idx]
+        
+        mod_loss = 0
+        for b in range(B):
+            # Extract only the masked patches that need to be reconstructed
+            masked_idx = mask_indices[b]
+            if len(masked_idx) > 0:  # Only compute if there are masked patches
+                target = original[b, masked_idx]
+                pred = reconstructed[b, masked_idx]
+                
+                # Compute MSE loss for this batch
+                batch_loss = F.mse_loss(pred, target, reduction=reduction)
+                mod_loss += batch_loss
+            
+        if reduction == 'mean' and B > 0:
+            mod_loss /= B
+            
+        individual_losses.append(mod_loss)
+        loss_dict['self_reconstruction'] += mod_loss * modality_weights[mod_idx]
+    
+    # Cross-modality reconstruction (predicting one modality from another)
+    cross_losses = []
+    for source_idx in range(num_modalities):
+        for target_idx in range(num_modalities):
+            if source_idx == target_idx:
+                continue  # Skip self-reconstruction (already computed above)
+                
+            # Only compute if there's a non-zero weight in the cross-modality matrix
+            if cross_modality_matrix[source_idx][target_idx] > 0:
+                # We're using masked positions from source modality but reconstructing target modality content
+                source_reconstructed = reconstructed_patches_list[source_idx]
+                target_original = original_patches_list[target_idx]
+                source_mask_indices = mask_indices_list[source_idx]
+                
+                cross_loss = 0
+                for b in range(B):
+                    masked_idx = source_mask_indices[b]
+                    if len(masked_idx) > 0:  # Only compute if there are masked patches
+                        source_pred = source_reconstructed[b, masked_idx]
+                        target_ground_truth = target_original[b, masked_idx]
+                        
+                        # Compute MSE loss for this cross-modal reconstruction
+                        batch_cross_loss = F.mse_loss(source_pred, target_ground_truth, reduction=reduction)
+                        cross_loss += batch_cross_loss
+                    
+                if reduction == 'mean' and B > 0:
+                    cross_loss /= B
+                    
+                weighted_cross_loss = cross_loss * cross_modality_matrix[source_idx][target_idx]
+                cross_losses.append(weighted_cross_loss)
+                loss_dict['cross_reconstruction'] += weighted_cross_loss
+    
+    # Calculate final loss
+    total_loss = loss_dict['self_reconstruction'] + loss_dict['cross_reconstruction']
+    
+    # Add individual modality losses to the dictionary for monitoring
+    for i, loss in enumerate(individual_losses):
+        loss_dict[f'mod{i+1}_loss'] = loss.item() if hasattr(loss, 'item') else loss
+        
+    return total_loss, loss_dict
 
+def compute_reconstruction_metrics(original_patches_list, reconstructed_patches_list, mask_indices_list):
+    """
+    Compute PSNR for reconstructed patches across modalities
+    
+    Args:
+        original_patches_list: List of original patches for each modality
+        reconstructed_patches_list: List of reconstructed patches for each modality
+        mask_indices_list: List of mask indices for each batch and modality
+    """
+    metrics = {}
+    all_psnr_values = []
+    
+    # Process each modality
+    for mod_idx, (orig_patches, recon_patches, mask_indices) in enumerate(
+            zip(original_patches_list, reconstructed_patches_list, mask_indices_list)):
+        psnr_values = []
+        # Process each batch
+        B = len(mask_indices)
+        for b in range(B):
+            masked_idx = mask_indices[b]
+            if len(masked_idx) > 0:
+                # Get original and reconstructed patches for this batch
+                orig = orig_patches[b, masked_idx]
+                recon = recon_patches[b, masked_idx]
+                mse = F.mse_loss(recon, orig)
+                max_signal = torch.max(orig).clamp(min=1e-6)
+                psnr = 20 * torch.log10(max_signal / torch.sqrt(mse).clamp(min=1e-6))
+                psnr_values.append(psnr.item())
+        # Average PSNR for this modality
+        if psnr_values:
+            metrics[f'psnr_mod{mod_idx+1}'] = sum(psnr_values) / len(psnr_values)
+            all_psnr_values.extend(psnr_values)
+        else:
+            metrics[f'psnr_mod{mod_idx+1}'] = 0.0
+    # Average PSNR across all modalities
+    metrics['psnr_avg'] = sum(all_psnr_values) / len(all_psnr_values) if all_psnr_values else 0.0
+    return metrics
+    
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
@@ -655,8 +821,7 @@ def main():
     if args.enable_reconstruction:
         vision_tower.mask_ratio = args.mask_ratio
         vision_tower.patch_size = vision_tower.config.patch_size
-    
-
+        
     # Build the multi-task model
     model = VisionAuxClassifier(
         vision_tower=vision_tower,
@@ -665,7 +830,9 @@ def main():
         extent_levels=6,     # e.g. 6 ordinal categories
         solidity_levels=4,   # e.g. 4 ordinal categories
         num_quadrants=27,     # e.g. 3x3x3 bounding box
-        use_cls=args.use_cls
+        use_cls=args.use_cls,
+        modality_weights=[1.0, 1.0, 1.0, 1.0],  # Equal weights for all modalities
+        cross_modality_matrix=None
     ).to(device)
     
     # -----------------------------------------------------------
@@ -702,26 +869,35 @@ def main():
         bbox_loss = 0.0
         recon_loss = 0.0
         task_loss = 0.0
+        psnr_avg = 0.0 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1} [Train]"):
-            mod1 = batch["t1c"].to(device)
-            mod2 = batch["t1n"].to(device)
-            mod3 = batch["t2f"].to(device)
-            mod4 = batch["t2w"].to(device)
-
+            mod1 = batch["t1c"].to(device)  # T1-contrast
+            mod2 = batch["t1n"].to(device)  # T1-native
+            mod3 = batch["t2f"].to(device)  # T2-FLAIR
+            mod4 = batch["t2w"].to(device)  # T2-weighted
+        
             area_targets = batch["area_targets"].to(device)         # [B,4]
             extent_targets = batch["extent_targets"].to(device)     # [B,4]
             solidity_targets = batch["solidity_targets"].to(device) # [B,4]
             bbox_targets = batch["bbox_targets"].to(device)         # [B,4,Q]
-
+        
             optimizer.zero_grad()
-            patches1 = extract_image_patches(mod1, model.vision_tower.patch_size)
+            
             if args.enable_reconstruction:
-                # Get masked features and reconstruction
-                full_features, masked_features, reconstructed_patches, mask, mask_indices = model.vision_tower(
-                    mod1, apply_mask=True)
-                # Forward pass for classification tasks with masked features
-                area_logits, extent_logits, solidity_logits, bbox_logits = model(
-                    mod1, mod2, mod3, mod4, use_masked_features=True, masked_features=masked_features)
+                # Forward pass with reconstruction
+                results = model(mod1, mod2, mod3, mod4, use_recon=True)
+                
+                # Get classification outputs
+                area_logits = results['classification']['area_logits']
+                extent_logits = results['classification']['extent_logits']
+                solidity_logits = results['classification']['solidity_logits']
+                bbox_logits = results['classification']['bbox_logits']
+                
+                # Get reconstruction outputs
+                original_patches_list = results['reconstruction']['original_patches_list']
+                reconstructed_patches_list = results['reconstruction']['reconstructed_patches_list']
+                mask_indices_list = results['reconstruction']['mask_indices_list']
+                
                 # Main task loss
                 main_loss, loss_dict = compute_aux_loss(
                     area_logits, extent_logits, solidity_logits, bbox_logits,
@@ -729,16 +905,26 @@ def main():
                     K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox,
                     bbox_loss=args.bbox_loss
                 )
-                # Reconstruction loss
-                rec_loss = compute_reconstruction_loss(patches1, reconstructed_patches, mask_indices)
+                
+                # Cross-modality reconstruction loss
+                rec_loss, rec_loss_dict = compute_cross_modality_reconstruction_loss(
+                    original_patches_list,
+                    reconstructed_patches_list,
+                    mask_indices_list,
+                    modality_weights=model.modality_weights,
+                    cross_modality_matrix=model.cross_modality_matrix
+                )
+                
                 # Combined loss
                 loss = main_loss + args.reconstruction_weight * rec_loss
+                
                 # Update metrics
                 recon_loss += rec_loss.item()
                 task_loss += main_loss.item()
             else:
+                # Standard forward pass without reconstruction
                 area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
-    
+                
                 loss, loss_dict = compute_aux_loss(
                     area_logits, extent_logits, solidity_logits, bbox_logits,
                     area_targets, extent_targets, solidity_targets, bbox_targets,
@@ -746,8 +932,10 @@ def main():
                     bbox_loss=args.bbox_loss
                 )
                 task_loss += loss.item()
+                
             loss.backward()
             optimizer.step()
+            
             total_loss += loss.item()
             area_loss += loss_dict["area_loss"]
             extent_loss += loss_dict["extent_loss"]
@@ -773,6 +961,7 @@ def main():
         extent_val_loss = 0.0
         solidity_val_loss = 0.0
         bbox_val_loss = 0.0
+        val_psnr_avg = 0.0
         model.eval()
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Epoch {epoch+1} [Val]"):
@@ -785,8 +974,30 @@ def main():
                 extent_targets = batch["extent_targets"].to(device)
                 solidity_targets = batch["solidity_targets"].to(device)
                 bbox_targets = batch["bbox_targets"].to(device)
-
-                area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
+                
+                
+                if args.enable_reconstruction:
+                    results = model(mod1, mod2, mod3, mod4, use_recon=True)
+                
+                    # Get classification outputs
+                    area_logits = results['classification']['area_logits']
+                    extent_logits = results['classification']['extent_logits']
+                    solidity_logits = results['classification']['solidity_logits']
+                    bbox_logits = results['classification']['bbox_logits']
+                    
+                    # Get reconstruction outputs
+                    original_patches_list = results['reconstruction']['original_patches_list']
+                    reconstructed_patches_list = results['reconstruction']['reconstructed_patches_list']
+                    mask_indices_list = results['reconstruction']['mask_indices_list']
+                    recon_metrics = compute_reconstruction_metrics(
+                        original_patches_list, 
+                        reconstructed_patches_list, 
+                        mask_indices_list
+                    )
+                    psnr_avg += recon_metrics['psnr_avg']
+                else:
+                    area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
+                    
                 loss, loss_dict = compute_aux_loss(
                     area_logits, extent_logits, solidity_logits, bbox_logits,
                     area_targets, extent_targets, solidity_targets, bbox_targets,
@@ -797,6 +1008,14 @@ def main():
                 extent_val_loss += loss_dict["extent_loss"]
                 solidity_val_loss += loss_dict["solidity_loss"]
                 bbox_val_loss += loss_dict["bbox_loss"]
+                
+                if args.enable_reconstruction:
+                    recon_metrics = compute_reconstruction_metrics(
+                        results['reconstruction']['original_patches_list'],
+                        results['reconstruction']['reconstructed_patches_list'],
+                        results['reconstruction']['mask_indices_list']
+                    )
+                    val_psnr_avg += recon_metrics['psnr_avg']
 
                 val_loss += loss.item()
 
@@ -805,8 +1024,8 @@ def main():
         solidity_val_loss /= len(val_loader)
         bbox_val_loss /= len(val_loader)
         val_loss /= len(val_loader)
-        logger.info(f"Epoch {epoch+1} - Val Loss: {val_loss:.4f} - Area Loss: {area_val_loss:.4f} - Extent Loss: {extent_val_loss:.4f} - Solidity Loss: {solidity_val_loss:.4f} - BBox Loss: {bbox_val_loss:.4f}")
-
+        logger.info(f"Epoch {epoch+1} - Val Loss: {val_loss:.4f} - Area Loss: {area_val_loss:.4f} - Extent Loss: {extent_val_loss:.4f} - Solidity Loss: {solidity_val_loss:.4f} - BBox Loss: {bbox_val_loss:.4f} - Val PSNR: {psnr_avg:.2f} dB")
+        
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), best_model_path)
@@ -846,7 +1065,7 @@ def main():
             bbox_targets = batch["bbox_targets"].to(device)         # [B,4,Q]
 
             area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
-
+                    
             # 1) Area CORAL => [B,4,9]
             B = area_logits.size(0)
             area_2d = area_logits.view(B*4, 9)              # => [B*4,9]
