@@ -16,6 +16,7 @@ from collections.abc import Sequence
 import torch
 import torch.nn as nn
 import random
+import torch.nn.functional as F
 
 from monai.networks.blocks.patchembedding import PatchEmbeddingBlock
 from monai.networks.blocks.transformerblock import TransformerBlock
@@ -206,6 +207,8 @@ class VisionReconstructionDecoder(nn.Module):
         
         # Calculate patch volume
         self.patch_volume = p_d * p_h * p_w
+        print('self.patch_volume ', self.patch_volume )
+        print('p_d, p_h, p_w', p_d, p_h, p_w)
         
         # Decoder layers
         self.decoder = nn.Sequential(
@@ -227,12 +230,23 @@ class VisionReconstructionDecoder(nn.Module):
         B = x.shape[0]
         reconstructed_patches = self.decoder(x)  # [B, num_patches, patch_volume]
         return reconstructed_patches
+        
+
 class ViT3DTower(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.select_layer = config.vision_select_layer
         self.select_feature = config.vision_select_feature
+        self.patch_size = self.config.patch_size
+        
+        # Calculate important dimensions for patching
+        pd, ph, pw = self.patch_size
+        i_d, i_h, i_w = self.config.image_size
+        self.num_patches_d = i_d // pd
+        self.num_patches_h = i_h // ph
+        self.num_patches_w = i_w // pw
+        self.num_patches = self.num_patches_d * self.num_patches_h * self.num_patches_w
 
         # Main ViT encoder
         self.vision_tower = ViT(
@@ -243,21 +257,57 @@ class ViT3DTower(nn.Module):
             spatial_dims=len(self.config.patch_size),
             classification=True,
         )
-        
-        # Reconstruction decoder (shared across all modalities)
-        self.decoder = VisionReconstructionDecoder(
-            hidden_size=768,  # Match hidden_size from ViT
-            patch_size=self.config.patch_size,
-            image_size=self.config.image_size
-        )
-        
         # Parameters for masking
         self.mask_ratio = getattr(config, 'mask_ratio', 0.3)  # Default to 30% masking
-        self.patch_size = getattr(config, 'patch_size', (16, 16, 16))
+        
+        if hasattr(config, 'modality_weights'):
+            self.modality_weights = self.config.modality_weights
+        # Initialize decoders based on requirements
+        self.num_modalities = getattr(config, 'num_modalities', 4)
+        
+        # Create self-reconstruction decoders for each modality
+        self.decoders = nn.ModuleList([
+            VisionReconstructionDecoder(
+                hidden_size=768, 
+                patch_size=self.config.patch_size, 
+                image_size=self.config.image_size
+            )
+            for _ in range(self.num_modalities)
+        ])
+        
+        # Create cross-modal decoders based on cross_modality_matrix
+        self.cross_decoders = nn.ModuleDict()
+        
+        if hasattr(config, 'cross_modality_matrix'):
+            self.cross_modality_matrix = self.config.cross_modality_matrix
+            self._create_cross_modal_decoders(self.cross_modality_matrix)
+        
+    
+    def _create_cross_modal_decoders(self, cross_modality_matrix):
+        """
+        Create cross-modal decoders based on non-zero entries in the cross-modality matrix.
+        """
+        matrix = cross_modality_matrix.cpu().numpy()
+        
+        for i in range(matrix.shape[0]):
+            for j in range(matrix.shape[1]):
+                if i != j and matrix[i, j] > 0:  # Skip self-reconstruction and zero-weighted pairs
+                    key = f'{i}_to_{j}'
+                    self.cross_decoders[key] = VisionReconstructionDecoder(
+                        hidden_size=768,
+                        patch_size=self.config.patch_size,
+                        image_size=self.config.image_size
+                    )
+        
+        if len(self.cross_decoders) > 0:
+            print(f"Created {len(self.cross_decoders)} cross-modal decoders:")
+            for key in self.cross_decoders.keys():
+                source, target = key.split('_to_')
+                print(f"  - Modality {source} → Modality {target}")
 
     def extract_image_patches(self, images):
         """
-        Extract patches from original images - integrated into the class
+        Extract patches from original images
         Args:
             images: [B, C, D, H, W]
         Returns:
@@ -277,86 +327,349 @@ class ViT3DTower(nn.Module):
         
         return patches
 
-    def apply_random_mask(self, features, mask_ratio=None):
-        if mask_ratio is None:
-            mask_ratio = self.mask_ratio
-        B, N, D = features.shape
-        # Don't mask the cls token (first token)
-        cls_token = features[:, 0:1, :]
-        patch_tokens = features[:, 1:, :]
-        L = patch_tokens.shape[1]  # Number of patches
-        num_mask = int(L * mask_ratio)
-        
-        # Create masks and indices for all batches at once
-        mask = torch.ones(B, L, device=features.device)
-        mask_indices = []
-        
-        for b in range(B):
-            # More efficient random indices generation
-            perm = torch.randperm(L, device=features.device)
-            idx = perm[:num_mask]
-            mask_indices.append(idx)
-            mask[b, idx] = 0
-            
-        # Apply mask with broadcasting
-        masked_patch_tokens = patch_tokens * mask.unsqueeze(-1)
-        # Reconstruct original shape with cls token
-        masked_features = torch.cat([cls_token, masked_patch_tokens], dim=1)
-        
-        return masked_features, mask, mask_indices
 
-    def process_single_modality(self, image, apply_mask=False):
-        """Process a single modality
+    def mask_input_patches(self, images):
+        """
+        Mask patches preferentially from center regions of the image
+        
         Args:
-            image: Input image [B, C, D, H, W]
+            images: [B, C, D, H, W]
+        Returns:
+            masked_images: [B, C, D, H, W] with masked patches
+            original_patches: [B, num_patches, patch_volume]
+            mask_indices: Indices of masked patches
+            patch_positions: Original 3D positions of all patches
+        """
+        B, C, D, H, W = images.shape
+        pd, ph, pw = self.patch_size
+        
+        # Number of patches in each dimension
+        nd, nh, nw = D // pd, H // ph, W // pw
+        num_patches = nd * nh * nw
+        
+        # Extract original patches before masking
+        original_patches = self.extract_image_patches(images)
+        
+        # Create a copy of images to apply masking
+        masked_images = images.clone()
+        
+        # Define center region - typically in brain MRI the center 60% contains most of the tissue
+        center_d_start, center_d_end = int(0.2 * nd), int(0.8 * nd)
+        center_h_start, center_h_end = int(0.2 * nh), int(0.8 * nh)
+        center_w_start, center_w_end = int(0.2 * nw), int(0.8 * nw)
+        
+        # Create a list of center patch indices
+        center_patch_indices = []
+        for d_idx in range(center_d_start, center_d_end):
+            for h_idx in range(center_h_start, center_h_end):
+                for w_idx in range(center_w_start, center_w_end):
+                    # Convert 3D position to flat index
+                    idx = d_idx * (nh * nw) + h_idx * nw + w_idx
+                    center_patch_indices.append(idx)
+        
+        # Convert to tensor
+        center_patch_indices = torch.tensor(center_patch_indices, device=images.device)
+        
+        # Mask indices for each batch
+        mask_indices = []
+        for b in range(B):
+            # Calculate how many patches to mask
+            num_mask = min(int(num_patches * self.mask_ratio), len(center_patch_indices))
+            
+            if len(center_patch_indices) > 0:
+                # Randomly select indices from center patches
+                perm = torch.randperm(len(center_patch_indices), device=images.device)
+                mask_idx = center_patch_indices[perm[:num_mask]]
+            else:
+                # Fall back to random selection if no center patches
+                perm = torch.randperm(num_patches, device=images.device)
+                mask_idx = perm[:num_mask]
+            
+            mask_indices.append(mask_idx)
+            
+            # Apply masking to the image
+            for idx in mask_idx:
+                # Convert flat index to 3D position
+                d_idx = idx // (nh * nw)
+                hw_idx = idx % (nh * nw)
+                h_idx = hw_idx // nw
+                w_idx = hw_idx % nw
+                
+                # Calculate starting position in the original image
+                d_start = d_idx * pd
+                h_start = h_idx * ph
+                w_start = w_idx * pw
+                
+                # Set the patch to zero (mask it)
+                masked_images[b, :, d_start:d_start+pd, h_start:h_start+ph, w_start:w_start+pw] = 0.0
+        
+        # Store patch positions for reference (helps with visualization)
+        patch_positions = []
+        for idx in range(num_patches):
+            d_idx = idx // (nh * nw)
+            hw_idx = idx % (nh * nw)
+            h_idx = hw_idx // nw
+            w_idx = hw_idx % nw
+            patch_positions.append((d_idx, h_idx, w_idx))
+            
+        return masked_images, original_patches, mask_indices, patch_positions
+
+    def forward_mim_multimodal(self, mod1, mod2, mod3, mod4, apply_mask=True):
+        """
+        Forward method for multimodal Masked Image Modeling
+        Args:
+            mod1, mod2, mod3, mod4: Input images for different modalities [B, C, D, H, W]
             apply_mask: Whether to apply masking
         Returns:
-            dict containing all needed outputs including features, patches, etc.
+            Dictionary with features and reconstructions for all modalities
         """
-        # Extract raw image patches first (for reconstruction targets)
-        original_patches = None
-        if apply_mask:
-            original_patches = self.extract_image_patches(image)
+        B = mod1.shape[0]
         
-        # Get features from vision tower
-        image_features, hidden_states = self.vision_tower(image)
+        modalities = [mod1, mod2, mod3, mod4]
+        modality_results = []
         
-        if self.select_layer == -1:
-            selected_features = image_features
-        elif self.select_layer < -1:
-            selected_features = hidden_states[self.select_feature]
-        else:
-            raise ValueError(f'Unexpected select layer: {self.select_layer}')
+        # Process each modality
+        for mod_idx, mod in enumerate(modalities):
+            if not apply_mask:
+                # Standard forward pass without masking
+                features, hidden_states = self.vision_tower(mod)
+                modality_results.append({'features': features})
+                continue
             
-        if apply_mask:
-            # Apply masking for reconstruction task
-            masked_features, mask, mask_indices = self.apply_random_mask(selected_features)
+            # 1. Mask random patches in the input image
+            masked_images, original_patches, mask_indices, patch_positions = self.mask_input_patches(mod)
             
-            # Extract patch tokens (excluding cls token)
-            patch_tokens = masked_features[:, 1:, :]
+            # 2. Forward pass with masked images
+            features, hidden_states = self.vision_tower(masked_images)
             
-            # Generate reconstructed patches
-            reconstructed_patches = self.decoder(patch_tokens)
-            
-            return {
-                'features': selected_features,
-                'masked_features': masked_features,
-                'original_patches': original_patches,
-                'reconstructed_patches': reconstructed_patches,
-                'mask': mask,
-                'mask_indices': mask_indices
-            }
-        else:
-            # Normal forward pass without reconstruction
+            # 3. Extract patch tokens (excluding cls token if present)
             if self.select_feature == 'patch':
-                selected_features = selected_features[:, 1:]
+                patch_tokens = features[:, 1:]
             elif self.select_feature == 'cls_patch':
-                selected_features = selected_features
+                patch_tokens = features[:, 1:]  # Exclude CLS token
             else:
                 raise ValueError(f'Unexpected select feature: {self.select_feature}')
+            
+            # 4. Reconstruct patches using the appropriate decoder
+            reconstructed_patches = self.decoders[mod_idx](patch_tokens)
+            
+            modality_results.append({
+                'features': features,
+                'original_patches': original_patches,
+                'reconstructed_patches': reconstructed_patches,
+                'mask_indices': mask_indices,
+                'patch_positions': patch_positions,
+                'masked_images': masked_images
+            })
+        
+        # 5. Cross-modal reconstruction based on cross-modal decoders
+        cross_reconstructed = {}
+        if apply_mask and len(self.cross_decoders) > 0:
+            for key, decoder in self.cross_decoders.items():
+                source_idx, target_idx = map(int, key.split('_to_'))
+                source_features = modality_results[source_idx]['features']
+                source_patch_tokens = source_features[:, 1:]  # Exclude CLS token
+                cross_reconstructed[key] = decoder(source_patch_tokens)
+        
+        combined_results = {
+            'modality_results': modality_results,
+            'cross_reconstructed': cross_reconstructed
+        }
+        
+        return combined_results
+    
+    def compute_mim_loss(self, original_patches, reconstructed_patches, mask_indices, reduction='mean'):
+        """
+        Compute MSE loss between original and reconstructed patches (only for masked patches)
+        Args:
+            original_patches: [B, num_patches, patch_volume]
+            reconstructed_patches: [B, num_patches, patch_volume]
+            mask_indices: List of indices of masked patches for each batch
+            reduction: 'mean' or 'sum'
+        Returns:
+            loss: MSE loss for masked patches
+        """
+        B = original_patches.shape[0]
+        loss = 0.0
+        
+        for b in range(B):
+            # Extract masked patches
+            masked_idx = mask_indices[b]
+            if len(masked_idx) > 0:
+                # Get original and reconstructed patches
+                orig = original_patches[b, masked_idx]
+                recon = reconstructed_patches[b, masked_idx]
                 
-            return selected_features
+                # Compute MSE loss
+                batch_loss = F.mse_loss(recon, orig, reduction=reduction)
+                loss += batch_loss
+        
+        if reduction == 'mean' and B > 0:
+            loss /= B
+            
+        return loss
+    
+    def compute_multimodal_mim_loss(self, 
+                                    original_patches_list,  # List of [B, num_patches, patch_volume] for each modality
+                                    reconstructed_patches_list,  # List of [B, num_patches, patch_volume] for each modality
+                                    cross_reconstructed_patches_dict, 
+                                    mask_indices_list,  # List of mask indices for each modality
+                                    reduction='mean'):
+        """
+        Compute loss for multimodal MIM (self-reconstruction + cross-modal reconstruction)
+        Returns:
+            total_loss: Combined loss
+            loss_dict: Dictionary with individual loss components
+        """
+        # Self-reconstruction loss
+        self_recon_loss = 0.0
+        mod_losses = []
+        
+        for mod_idx, (orig_patches, reconstructed_patches, mask_indices) in enumerate(zip(original_patches_list, reconstructed_patches_list, mask_indices_list)):
+            mod_loss = self.compute_mim_loss(orig_patches, reconstructed_patches, mask_indices)
+            weighted_mod_loss = mod_loss * self.modality_weights[mod_idx]
+            self_recon_loss += weighted_mod_loss
+            mod_losses.append(mod_loss.item())
+            
+        # Cross-modal reconstruction loss
+        cross_recon_loss = 0.0
+        cross_losses = []
+        
+        # We're only doing cross-modal reconstruction from T2f (mod index 2) to other modalities
+        source_idx = 2  # T2f 
+        for target_idx in [0, 1, 3]:  # T1c, T1n, T2w
+            key = f'{source_idx}_to_{target_idx}'
+            if key in cross_reconstructed_patches_dict:
+                cross_loss = self.compute_mim_loss(
+                    original_patches_list[target_idx],  # Target modality original
+                    cross_reconstructed_patches_dict[key],  # Source → Target reconstruction
+                    mask_indices_list[source_idx]  # Masked indices from source modality
+                )
+                weighted_cross_loss = cross_loss * self.cross_modality_matrix[source_idx, target_idx]
+                cross_recon_loss += weighted_cross_loss
+                cross_losses.append((source_idx, target_idx, cross_loss.item()))
+            
+        # Total loss
+        total_loss = self_recon_loss + cross_recon_loss
+        
+        # Loss dictionary for logging
+        loss_dict = {
+            'self_reconstruction': self_recon_loss.item(),
+            'cross_reconstruction': cross_recon_loss.item() if isinstance(cross_recon_loss, torch.Tensor) else cross_recon_loss
+        }
+        
+        # Add individual modality losses for monitoring
+        for mod_idx, loss in enumerate(mod_losses):
+            loss_dict[f'mod{mod_idx}_recon_loss'] = loss
+            
+        # Add cross-modal reconstruction losses
+        for source_idx, target_idx, loss in cross_losses:
+            loss_dict[f'cross_{source_idx}_to_{target_idx}_loss'] = loss
+        
+        return total_loss, loss_dict
 
+
+    
+    def compute_cross_modality_reconstruction_loss(self, 
+        original_patches_list,  # List of [B, num_patches, patch_volume] for each modality
+        reconstructed_patches_list,  # List of [B, num_patches, patch_volume] for each modality
+        cross_reconstructed_patches_dict, 
+        mask_indices_list,  # List of mask indices for each modality
+        reduction='mean'
+    ):      
+        B = original_patches_list[0].shape[0]
+        num_modalities = len(original_patches_list)
+        
+        # Dictionary to store individual loss components
+        loss_dict = {
+            'self_reconstruction': 0.0,
+            'cross_reconstruction': 0.0
+        }
+        
+        # Individual modality losses (self-reconstruction)
+        individual_losses = []
+        for mod_idx in range(num_modalities):
+            original = original_patches_list[mod_idx]
+            reconstructed = reconstructed_patches_list[mod_idx]
+            mask_indices = mask_indices_list[mod_idx]
+            
+            mod_loss = 0
+            num_batches = 0
+            for b in range(B):
+                # Extract only the masked patches that need to be reconstructed
+                if b < len(mask_indices):  # Check if this batch has mask indices
+                    masked_idx = mask_indices[b]
+                    if len(masked_idx) > 0:  # Only compute if there are masked patches
+                        target = original[b, masked_idx]
+                        pred = reconstructed[b, masked_idx]
+                        
+                        # Compute MSE loss for this batch
+                        batch_loss = F.mse_loss(pred, target, reduction=reduction)
+                        mod_loss += batch_loss
+                        num_batches += 1
+                
+            # Average over batches if using mean reduction
+            if reduction == 'mean' and num_batches > 0:
+                mod_loss /= num_batches
+                
+            individual_losses.append(mod_loss)
+            # Apply modality weight
+            weighted_mod_loss = mod_loss * self.modality_weights[mod_idx]
+            loss_dict['self_reconstruction'] += weighted_mod_loss
+        
+        # Cross-modality reconstruction (predicting one modality from another)
+        cross_losses = []
+        for key, cross_reconstructed in cross_reconstructed_patches_dict.items():
+            # Parse source and target indices from key (format: "source_idx_to_target_idx")
+            source_idx, target_idx = map(int, key.split('_to_'))
+            
+            # Only compute if there's a non-zero weight in the cross-modality matrix
+            if self.cross_modality_matrix[source_idx, target_idx] > 0:
+                # We're using masked positions from source modality but reconstructing target modality content
+                target_original = original_patches_list[target_idx]
+                source_mask_indices = mask_indices_list[source_idx]
+                
+                cross_loss = 0
+                num_batches = 0
+                for b in range(B):
+                    if b < len(source_mask_indices):  # Check if this batch has mask indices
+                        masked_idx = source_mask_indices[b]
+                        if len(masked_idx) > 0:  # Only compute if there are masked patches
+                            source_pred = cross_reconstructed[b, masked_idx]
+                            target_ground_truth = target_original[b, masked_idx]
+                            
+                            # Compute MSE loss for this cross-modal reconstruction
+                            batch_cross_loss = F.mse_loss(source_pred, target_ground_truth, reduction=reduction)
+                            cross_loss += batch_cross_loss
+                            num_batches += 1
+                    
+                # Average over batches if using mean reduction
+                if reduction == 'mean' and num_batches > 0:
+                    cross_loss /= num_batches
+                    
+                weighted_cross_loss = cross_loss * self.cross_modality_matrix[source_idx, target_idx]
+                cross_losses.append((source_idx, target_idx, cross_loss.item()))
+                loss_dict['cross_reconstruction'] += weighted_cross_loss
+        
+        # Calculate final loss
+        total_loss = loss_dict['self_reconstruction'] + loss_dict['cross_reconstruction']
+        
+        # Convert tensor values to float for the loss dictionary
+        if isinstance(loss_dict['self_reconstruction'], torch.Tensor):
+            loss_dict['self_reconstruction'] = loss_dict['self_reconstruction'].item()
+        if isinstance(loss_dict['cross_reconstruction'], torch.Tensor):
+            loss_dict['cross_reconstruction'] = loss_dict['cross_reconstruction'].item()
+        
+        # Add individual modality losses to the dictionary for monitoring
+        for i, loss in enumerate(individual_losses):
+            loss_dict[f'mod{i+1}_loss'] = loss.item() if isinstance(loss, torch.Tensor) else loss
+            
+        # Add individual cross-modal losses for monitoring
+        for source_idx, target_idx, loss in cross_losses:
+            loss_dict[f'cross_{source_idx}_to_{target_idx}_loss'] = loss
+            
+        return total_loss, loss_dict
+    
     def forward(self, images, apply_mask=False, multimodal=False, mod2=None, mod3=None, mod4=None):
         """Unified forward method with support for both single and multiple modalities
         
@@ -376,49 +689,115 @@ class ViT3DTower(nn.Module):
         """
         # Single modality case
         if not multimodal:
-            return self.process_single_modality(images, apply_mask=apply_mask)
+            return self.process_single_modality(images, 0, apply_mask)
         
-        # Multimodal case - requires all 4 modalities
-        if mod2 is None or mod3 is None or mod4 is None:
-            raise ValueError("All 4 modalities must be provided when multimodal=True")
-            
-        mod1 = images  # First modality is passed as 'images'
+        # Multimodal case - requires all modalities
+        # Collect all modalities that are provided
+        modalities = [images]  # images is always mod1
+        if mod2 is not None:
+            modalities.append(mod2)
+        if mod3 is not None:
+            modalities.append(mod3)
+        if mod4 is not None:
+            modalities.append(mod4)
         
-        # Process each modality
+        # Check if we have the expected number of modalities
+        expected_modalities = getattr(self, 'num_modalities', 4)
+        if len(modalities) != expected_modalities:
+            raise ValueError(f"Expected {expected_modalities} modalities, but got {len(modalities)}")
+        
+        # Process each modality with its corresponding decoder
         if apply_mask:
-            # Apply masking to all modalities
-            mod1_results = self.process_single_modality(mod1, apply_mask=True)
-            mod2_results = self.process_single_modality(mod2, apply_mask=True)
-            mod3_results = self.process_single_modality(mod3, apply_mask=True)
-            mod4_results = self.process_single_modality(mod4, apply_mask=True)
+            # Process each modality with its corresponding index
+            modality_results = [self.process_single_modality(mod, mod_idx, True) 
+                               for mod_idx, mod in enumerate(modalities)]
+            
+            # Handle cross-modal reconstructions dynamically based on cross_decoders
+            cross_recon = {}
+            if hasattr(self, 'cross_decoders') and self.cross_decoders:
+                for key, decoder in self.cross_decoders.items():
+                    source_idx, target_idx = map(int, key.split('_to_'))
+                    
+                    # Check if source modality exists and has masked features
+                    if source_idx < len(modality_results) and 'masked_features' in modality_results[source_idx]:
+                        source_patch_tokens = modality_results[source_idx]['masked_features'][:, 1:, :]
+                        cross_recon[key] = decoder(source_patch_tokens)
             
             results = {
-                'features': [mod1_results['features'], mod2_results['features'], 
-                            mod3_results['features'], mod4_results['features']],
-                'masked_features': [mod1_results['masked_features'], mod2_results['masked_features'], 
-                                   mod3_results['masked_features'], mod4_results['masked_features']],
-                'original_patches': [mod1_results['original_patches'], mod2_results['original_patches'], 
-                                    mod3_results['original_patches'], mod4_results['original_patches']],
-                'reconstructed': [mod1_results['reconstructed_patches'], mod2_results['reconstructed_patches'], 
-                                 mod3_results['reconstructed_patches'], mod4_results['reconstructed_patches']],
-                'masks': [mod1_results['mask'], mod2_results['mask'], 
-                         mod3_results['mask'], mod4_results['mask']],
-                'mask_indices': [mod1_results['mask_indices'], mod2_results['mask_indices'], 
-                                mod3_results['mask_indices'], mod4_results['mask_indices']]
+                'modality_results': modality_results,
+                'cross_reconstructed': cross_recon
             }
         else:
             # Standard forward pass without masking
-            features1 = self.process_single_modality(mod1, apply_mask=False)
-            features2 = self.process_single_modality(mod2, apply_mask=False)
-            features3 = self.process_single_modality(mod3, apply_mask=False)
-            features4 = self.process_single_modality(mod4, apply_mask=False)
+            features_list = [self.process_single_modality(mod, mod_idx, False)
+                            for mod_idx, mod in enumerate(modalities)]
             
             results = {
-                'features': [features1, features2, features3, features4]
+                'features': features_list
             }
             
         return results
+    
+    def process_single_modality(self, image, modality_idx=0, apply_mask=False):
+        """Process a single modality
+        Args:
+            image: Input image [B, C, D, H, W]
+            modality_idx: Index of the modality (0-3 for t1c, t1n, t2f, t2w)
+            apply_mask: Whether to apply masking
+        Returns:
+            dict containing all needed outputs including features, patches, etc.
+        """
+        # Extract raw image patches first (for reconstruction targets)
+        original_patches = None
+        masked_images = None
+        mask_indices = None
+        patch_positions = None
         
+        if apply_mask:
+            # Apply masking directly to the input images
+            masked_images, original_patches, mask_indices, patch_positions = self.mask_input_patches(image)
+            # Forward pass with masked images
+            image_features, hidden_states = self.vision_tower(masked_images)
+        else:
+            # Standard forward pass without masking
+            image_features, hidden_states = self.vision_tower(image)
+        
+        if self.select_layer == -1:
+            selected_features = image_features
+        elif self.select_layer < -1:
+            selected_features = hidden_states[self.select_feature]
+        else:
+            raise ValueError(f'Unexpected select layer: {self.select_layer}')
+            
+        # Apply reconstruction if needed
+        reconstructed_patches = None
+        if apply_mask:
+            # Extract patch tokens (excluding cls token)
+            patch_tokens = selected_features[:, 1:, :]
+            
+            # Use correct decoder for this modality
+            reconstructed_patches = self.decoders[modality_idx](patch_tokens)
+            
+            return {
+                'features': selected_features,
+                'masked_features': selected_features,
+                'original_patches': original_patches,
+                'reconstructed_patches': reconstructed_patches,
+                'mask_indices': mask_indices,
+                'patch_positions': patch_positions,
+                'masked_images': masked_images
+            }
+        else:
+            # Normal forward pass without reconstruction
+            if self.select_feature == 'patch':
+                selected_features = selected_features[:, 1:]
+            elif self.select_feature == 'cls_patch':
+                selected_features = selected_features
+            else:
+                raise ValueError(f'Unexpected select feature: {self.select_feature}')
+                
+            return selected_features
+    
     @property
     def dtype(self):
         return self.vision_tower.dtype
