@@ -62,13 +62,8 @@ def coral_loss(logits, targets, K):
     return loss
 
 
-def coral_predict(logits, K):
-    """
-    Convert CORAL logits => integer class in [0..K-1].
-    logits: [N, (K-1)]
-    Return predicted class by summing how many thresholds are "passed" (>=0.5).
-    """
-    probs = torch.sigmoid(logits)  # => [N, (K-1)]
+def coral_predict(logits):
+    probs = torch.sigmoid(logits)
     passed = (probs >= 0.5).sum(dim=1)  # how many thresholds were exceeded
     return passed
 
