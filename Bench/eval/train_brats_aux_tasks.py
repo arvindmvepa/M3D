@@ -21,38 +21,6 @@ from dataclasses import dataclass, field
 from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
 
 
-# Precompute a 27x27 dist_matrix
-dist_matrix = [[0.0]*27 for _ in range(27)]
-
-coords_3d = []
-for idx in range(27):
-    r = idx // 9
-    c = (idx % 9) // 3
-    d = idx % 3
-    coords_3d.append((r, c, d))
-
-for i in range(27):
-    (r1, c1, d1) = coords_3d[i]
-    for j in range(27):
-        (r2, c2, d2) = coords_3d[j]
-        dist = math.sqrt((r1 - r2)**2 + (c1 - c2)**2 + (d1 - d2)**2)
-        dist_matrix[i][j] = dist
-
-
-def make_soft_label(gt_quadrants, dist_matrix, sigma=1.0):
-    label = torch.zeros(27)
-    for i in gt_quadrants:
-        # If `i` is a PyTorch scalar tensor, do `i_val = i.item()`
-        # If `i` is already an int, you can skip this.
-        i_val = int(i)  # or i.item() if it's a 1-element tensor
-
-        for j in range(27):
-            dist_ij = dist_matrix[i_val][j]
-            val = math.exp(- (dist_ij**2) / (2*(sigma**2)))
-            label[j] = min(1.0, label[j] + val)
-    return label
-
-
 def setup_logger(log_file="training.log", log_to_console=True):
     logger = logging.getLogger("training_logger")
     logger.setLevel(logging.INFO)
@@ -72,9 +40,7 @@ def setup_logger(log_file="training.log", log_to_console=True):
 
     return logger
 
-# -------------------------------------------------------------------------
-# 2) CORAL Utilities
-# -------------------------------------------------------------------------
+
 def coral_loss(logits, targets, K):
     """
     CORAL loss for ordinal classification with K discrete levels (0..K-1).
@@ -95,6 +61,7 @@ def coral_loss(logits, targets, K):
     loss = bce(logits, T)
     return loss
 
+
 def coral_predict(logits, K):
     """
     Convert CORAL logits => integer class in [0..K-1].
@@ -106,80 +73,10 @@ def coral_predict(logits, K):
     return passed
 
 
-def distance_aware_bce_loss(
-    logits,               # shape [B, L, 27]
-    gt_quadrants_batch,   # list of length B, each is list of length L, each is list of quadrant indices
-    sigma=1.0
-):
-    """
-    Builds a [B, L, 27] soft label for each (b, l) from gt_quadrants_batch
-    using RBF adjacency. Then does standard BCEWithLogits with that label.
-    Returns a scalar loss.
-    """
-    B, L, Q = logits.shape
-    if Q != 27:
-        raise ValueError(f"Expected 27 quadrants, got Q={Q}.")
-
-    # We'll build a tensor of shape [B, L, 27] for soft labels
-    soft_labels = torch.zeros(B, L, 27, dtype=torch.float, device=logits.device)
-
-    for b in range(B):
-        label_sets_for_b = gt_quadrants_batch[b]  # list of length L
-        if len(label_sets_for_b) != L:
-            raise ValueError(f"Sample {b} has {len(label_sets_for_b)} label sets, expected {L}.")
-
-        for l in range(L):
-            gt_quadrants = label_sets_for_b[l]  # e.g. [0,1,2]
-            soft_label_1d = make_soft_label(gt_quadrants, dist_matrix, sigma=sigma)  # shape [27]
-            soft_labels[b, l, :] = soft_label_1d
-
-    # Now standard BCEWithLogits
-    return F.binary_cross_entropy_with_logits(logits, soft_labels)
-
-
-def distance_aware_jaccard_loss(
-        logits,  # shape [B, L, 27]
-        gt_quadrants_batch,  # list of length B, each => list of length L => list of quadrant indices
-        dist_matrix,
-        sigma=1.0,
-        eps=1e-7
-):
-    """
-    1) Builds a [B, L, 27] 'soft label' from RBF adjacency for each sample+label
-    2) Uses a 'soft IoU' measure:  1 - intersection/union  => the 'Jaccard loss'
-
-    This typically aligns better with the IoU metric than BCE does.
-    """
-    B, L, Q = logits.shape
-    if Q != 27:
-        raise ValueError(f"Expected shape [B,L,27], got Q={Q} instead.")
-
-    # (1) Build the distance-aware labels [B, L, 27]
-    soft_labels = torch.zeros(B, L, 27, dtype=torch.float, device=logits.device)
-
-    for b in range(B):
-        label_sets_for_b = gt_quadrants_batch[b]  # list of length L
-        if len(label_sets_for_b) != L:
-            raise ValueError(f"Sample {b} has {len(label_sets_for_b)} label sets, expected {L}.")
-
-        for l in range(L):
-            gt_quadrants = label_sets_for_b[l]  # e.g. [0,1,2]
-            soft_label_1d = make_soft_label(gt_quadrants, dist_matrix, sigma=sigma)
-            soft_labels[b, l, :] = soft_label_1d
-
-    # (2) "Soft IoU" Calculation
-    #   - Convert logits -> probabilities via sigmoid
-    #   - Sum over the quadrant dimension => shape [B, L]
-    probs = torch.sigmoid(logits)  # [B, L, 27]
-    intersection = (probs * soft_labels).sum(dim=2)  # [B, L]
-    union = (probs + soft_labels - probs * soft_labels).sum(dim=2)  # [B, L]
-
-    # Jaccard = intersection / union, safe with eps
-    jaccard = (intersection + eps) / (union + eps)  # [B, L]
-
-    # The "loss" => 1 - average_jaccard
-    #   average over all BxL => single scalar
-    return 1.0 - jaccard.mean()
+def ce_predict(logits):
+    probs = torch.softmax(logits, dim=1)  # => [N, (K-1)]
+    preds = torch.argmax(probs, dim=1)  # => [N]
+    return preds
 
 
 def mse_loss(logits, labels):
@@ -201,94 +98,60 @@ def mse_loss(logits, labels):
     loss_mse = F.mse_loss(probs, labels)
     return loss_mse
 
+
 def bce_loss(logits, labels):
-    """
-    Builds a multi-hot label of shape [B, L, 27] with 1's in the
-    ground-truth quadrants, then does standard BCEWithLogitsLoss.
-    Returns a scalar.
-    """
     B, L, Q = logits.shape
-    if Q != 27:
-        raise ValueError(f"(logits) Expected 27 quadrants, got Q={Q}.")
+    if Q != 11:
+        raise ValueError(f"(logits) Expected 11 regions, got Q={Q}.")
     B_, L_, Q_ = labels.shape
-    if Q_ != 27:
-        raise ValueError(f"(labels) Expected 27 quadrants, got Q={Q_}.")
+    if Q_ != 11:
+        raise ValueError(f"(labels) Expected 11 regions, got Q={Q_}.")
 
     # Compute BCE with logits
     loss_bce = F.binary_cross_entropy_with_logits(logits, labels)
     return loss_bce
 
 
-def soft_jaccard_loss(bbox_logits, bbox_targets, eps=1e-7):
-    """
-    bbox_logits: [B,4,Q]  raw
-    bbox_targets: [B,4,Q] 0/1
-    Returns a scalar = 1 - mean_jaccard.
-    """
-    p = torch.sigmoid(bbox_logits)  # => [B,4,Q]
-    intersection = (p * bbox_targets).sum(dim=2)  # [B,4]
-    union = (p + bbox_targets - p*bbox_targets).sum(dim=2)  # [B,4]
-    jaccard = (intersection + eps) / (union + eps)  # [B,4]
-    return 1.0 - jaccard.mean()
+def ce_loss(logits, labels):
+    loss_ce = F.cross_entropy(logits, labels)
+    return loss_ce
 
-# -------------------------------------------------------------------------
-# 4) Multi-Task Loss: CORAL for area/extent/solidity + Soft Jaccard for bbox
-# -------------------------------------------------------------------------
+
 def compute_aux_loss(
-    area_logits, extent_logits, solidity_logits, bbox_logits,
-    area_targets, extent_targets, solidity_targets, bbox_targets,
-    K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=False,
-    bbox_loss="jaccard"
+    area_logits, shape_logits, satellite_logits, region_logits,
+    area_targets, shape_targets, satellite_targets, region_targets,
+    K_area=8, K_shape=7, K_satellite=5, keep_only_region=False,
+    region_loss="bce"
 ):
-    """
-    area_logits: [B,4,(K_area-1)]
-    extent_logits: [B,4,(K_extent-1)]
-    solidity_logits: [B,4,(K_solidity-1)]
-    bbox_logits: [B,4,Q]
-    area_targets: [B,4] in [0..K_area-1]
-    extent_targets: [B,4] in [0..K_extent-1]
-    solidity_targets: [B,4] in [0..K_solidity-1]
-    bbox_targets: [B,4,Q] in {0,1}
-    """
     B = area_logits.size(0)
 
-    # Flatten area => [B*4,(K_area-1)], area_targets => [B*4]
     area_2d = area_logits.view(B*4, (K_area-1))
     area_tgt_1d = area_targets.view(B*4)
     area_loss = coral_loss(area_2d, area_tgt_1d, K_area)
 
-    # extent => [B*4,(K_extent-1)]
-    extent_2d = extent_logits.view(B*4, (K_extent-1))
-    extent_tgt_1d = extent_targets.view(B*4)
-    extent_loss = coral_loss(extent_2d, extent_tgt_1d, K_extent)
+    shape_2d = shape_logits.view(B * 4, K_shape)
+    shape_tgt_1d = shape_targets.view(B * 4)
+    shape_loss = ce_loss(shape_2d, shape_tgt_1d, K_shape)
 
     # solidity => [B*4,(K_solidity-1)]
-    solidity_2d = solidity_logits.view(B*4, (K_solidity-1))
-    solidity_tgt_1d = solidity_targets.view(B*4)
-    solidity_loss = coral_loss(solidity_2d, solidity_tgt_1d, K_solidity)
+    satellite_2d = satellite_logits.view(B * 4, K_satellite)
+    satellite_tgt_1d = satellite_targets.view(B * 4)
+    satellite_loss = ce_loss(satellite_2d, satellite_tgt_1d, K_satellite)
 
-    if bbox_loss == "dist_jaccard":
-        bbox_loss = distance_aware_jaccard_loss(bbox_logits, bbox_targets, dist_matrix)
-    elif bbox_loss == "dist_bce":
-        bbox_loss = distance_aware_bce_loss(bbox_logits, bbox_targets)
-    elif bbox_loss == "bce":
-        bbox_loss = bce_loss(bbox_logits, bbox_targets)
-    elif bbox_loss == "mse":
-        bbox_loss = mse_loss(bbox_logits, bbox_targets)
-    elif bbox_loss == "jaccard":
-        bbox_loss = soft_jaccard_loss(bbox_logits, bbox_targets)
+    if region_loss == "bce":
+        region_loss = bce_loss(region_logits, region_targets)
     else:
-        raise ValueError(f"Unknown bbox_loss: {bbox_loss}")
+        raise ValueError(f"Unknown bbox_loss: {region_loss}")
 
-    if keep_only_bbox:
-        total_loss = bbox_loss
+    if keep_only_region:
+        total_loss = region_loss
     else:
-        total_loss = area_loss + extent_loss + solidity_loss + bbox_loss
+        total_loss = area_loss + shape_loss + satellite_loss + region_loss
     loss_dict = {
         "area_loss": area_loss.item(),
-        "extent_loss": extent_loss.item(),
-        "solidity_loss": solidity_loss.item(),
-        "bbox_loss": bbox_loss.item()
+        "shape_loss": shape_loss.item(),
+        "satellite_loss": satellite_loss.item(),
+        "region_loss": region_loss.item()
     }
     return total_loss, loss_dict
 
@@ -296,20 +159,12 @@ def compute_aux_loss(
 # 5) Dataset: CORAL + BBox
 # -------------------------------------------------------------------------
 class AuxVisionDataset(Dataset):
-    """
-    This dataset loads:
-      - "area" in [0..9] => 10 ordinal levels => 9 CORAL logits
-      - "extent" in [0..5] => 6 ordinal levels => 5 CORAL logits
-      - "solidity" in [0..3] => 4 ordinal levels => 3 CORAL logits
-      - "bbox" => multi-hot
-    For 4 labels: Non-Enh, FLAIR, Enh, Resection
-    We'll store them in a big dictionary: seg_file -> { label_name -> {area, extent, solidity, bbox} }
-    """
-    def __init__(self, json_path, mode="train", transform=None, num_quadrants=27):
+
+    def __init__(self, json_path, mode="train", transform=None, num_regions=11):
         super().__init__()
         self.mode = mode
         self.transform = transform
-        self.num_quadrants = num_quadrants
+        self.num_regions = num_regions
 
         self.labels_order = [
             "Non-Enhancing Tumor",
@@ -373,20 +228,20 @@ class AuxVisionDataset(Dataset):
         # Prepare area, extent, solidity, bbox
         # area, extent, solidity => [4], each label an integer in correct range
         area_vals = torch.zeros(4, dtype=torch.long)
-        extent_vals = torch.zeros(4, dtype=torch.long)
-        solidity_vals = torch.zeros(4, dtype=torch.long)
-        bbox_vals = torch.zeros((4, self.num_quadrants), dtype=torch.float)
+        shape_vals = torch.zeros(4, dtype=torch.long)
+        satellite_vals = torch.zeros(4, dtype=torch.long)
+        region_vals = torch.zeros((4, self.num_regions), dtype=torch.float)
 
         for i, lbl in enumerate(self.labels_order):
             if lbl in label_info:
                 metrics = label_info[lbl]
-                area_vals[i] = metrics["area"]         # 0..9
-                extent_vals[i] = metrics["extent"]     # 0..5
-                solidity_vals[i] = metrics["solidity"] # 0..3
-                quad_list = metrics["bbox"]            # e.g. [16,17,20]
-                for q in quad_list:
-                    if q < self.num_quadrants:
-                        bbox_vals[i,q] = 1.0
+                area_vals[i] = metrics["area"]
+                shape_vals[i] = metrics["shape"]
+                satellite_vals[i] = metrics["satellite"]
+                region_list = metrics["region"]
+                for q in region_list:
+                    if q < self.num_regions:
+                        region_vals[i,q] = 1.0
 
         return {
             "t1c": mod_t1c,
@@ -394,9 +249,9 @@ class AuxVisionDataset(Dataset):
             "t2f": mod_t2f,
             "t2w": mod_t2w,
             "area_targets": area_vals,         # [4]
-            "extent_targets": extent_vals,     # [4]
-            "solidity_targets": solidity_vals, # [4]
-            "bbox_targets": bbox_vals,         # [4,num_quadrants]
+            "extent_targets": shape_vals,     # [4]
+            "solidity_targets": satellite_vals, # [4]
+            "bbox_targets": region_vals,         # [4,num_quadrants]
             "seg_file": seg_file
         }
 
@@ -417,10 +272,10 @@ class VisionAuxClassifier(nn.Module):
         self,
         vision_tower: nn.Module,
         num_modalities=4,
-        area_levels=10,    # => produce (area_levels-1) logits
-        extent_levels=6,   # => produce (extent_levels-1) logits
-        solidity_levels=4, # => produce (solidity_levels-1) logits
-        num_quadrants=27,   # for bbox multi-hot
+        area_levels=8,
+        shape_levels=7,
+        satellite_levels=5,
+        num_regions=11,
         use_cls=False
     ):
         super().__init__()
@@ -430,37 +285,23 @@ class VisionAuxClassifier(nn.Module):
             cls_hidden_dim = 768 * num_modalities
             non_cls_hidden_dim = 768 * num_modalities * 2048
 
-            # area => [B,4,(area_levels-1)]
             self.area_head = nn.Linear(cls_hidden_dim, 4 * (area_levels - 1))
-
-            # extent => [B,4,(extent_levels-1)]
-            self.extent_head = nn.Linear(cls_hidden_dim, 4 * (extent_levels - 1))
-
-            # solidity => [B,4,(solidity_levels-1)]
-            self.solidity_head = nn.Linear(cls_hidden_dim, 4 * (solidity_levels - 1))
-
-            # bbox => [B,4,num_quadrants]
-            self.bbox_head = nn.Linear(non_cls_hidden_dim, 4 * num_quadrants)
-
+            self.shape_head = nn.Linear(cls_hidden_dim, 4 * shape_levels)
+            self.satellite_head = nn.Linear(cls_hidden_dim, 4 * satellite_levels)
+            self.region_head = nn.Linear(non_cls_hidden_dim, 4 * num_regions)
         else:
             hidden_dim = 768 * num_modalities * 2048
 
             # area => [B,4,(area_levels-1)]
             self.area_head = nn.Linear(hidden_dim, 4 * (area_levels - 1))
-
-            # extent => [B,4,(extent_levels-1)]
-            self.extent_head = nn.Linear(hidden_dim, 4 * (extent_levels - 1))
-
-            # solidity => [B,4,(solidity_levels-1)]
-            self.solidity_head = nn.Linear(hidden_dim, 4 * (solidity_levels - 1))
-
-            # bbox => [B,4,num_quadrants]
-            self.bbox_head = nn.Linear(hidden_dim, 4 * num_quadrants)
+            self.shape_head = nn.Linear(hidden_dim, 4 * shape_levels)
+            self.satellite_head = nn.Linear(hidden_dim, 4 * satellite_levels)
+            self.region_head = nn.Linear(hidden_dim, 4 * num_regions)
 
         self.area_levels = area_levels
-        self.extent_levels = extent_levels
-        self.solidity_levels = solidity_levels
-        self.num_quadrants = num_quadrants
+        self.shape_levels = shape_levels
+        self.satellite_levels = satellite_levels
+        self.num_regions = num_regions
 
     def forward(self, mod1, mod2, mod3, mod4):
         B = mod1.size(0)
@@ -478,31 +319,31 @@ class VisionAuxClassifier(nn.Module):
             non_cls_feats = torch.cat([feats1[:, 1:], feats2[:, 1:], feats3[:, 1:], feats4[:, 1:]], dim=1)  # [B, 768*4]
             non_cls_feats = non_cls_feats.view(B, -1)  # [B, 768*4*2048]
             area_feats = cls_feats
-            extent_feats = cls_feats
-            solidity_feats = cls_feats
-            bbox_feats = non_cls_feats
+            shape_feats = cls_feats
+            satellite_feats = cls_feats
+            region_feats = non_cls_feats
         else:
             # Concatenate features from all modalities
             feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)  # [B, 768*4, 2048]
             feats = feats.view(B, -1)
             area_feats = feats
-            extent_feats = feats
-            solidity_feats = feats
-            bbox_feats = feats
+            shape_feats = feats
+            satellite_feats = feats
+            region_feats = feats
         # area
-        area_raw = self.area_head(area_feats)  # [B,4*(K-1)]
+        area_raw = self.area_head(area_feats)
         area_logits = area_raw.view(B, 4, (self.area_levels - 1))
-        # extent
-        extent_raw = self.extent_head(extent_feats)
-        extent_logits = extent_raw.view(B, 4, (self.extent_levels - 1))
-        # solidity
-        solidity_raw = self.solidity_head(solidity_feats)
-        solidity_logits = solidity_raw.view(B, 4, (self.solidity_levels - 1))
-        # bbox
-        bbox_raw = self.bbox_head(bbox_feats)  # [B,4*num_quadrants]
-        bbox_logits = bbox_raw.view(B, 4, self.num_quadrants)
+        # shape
+        shape_raw = self.shape_head(shape_feats)
+        shape_logits = shape_raw.view(B, 4, self.shape_levels)
+        # satellite
+        satellite_raw = self.satellite_head(satellite_feats)
+        satellite_logits = satellite_raw.view(B, 4, self.satellite_levels)
+        # region
+        region_raw = self.region_head(region_feats)
+        region_logits = region_raw.view(B, 4, self.num_regions)
 
-        return area_logits, extent_logits, solidity_logits, bbox_logits
+        return area_logits, shape_logits, satellite_logits, region_logits
 
 
 # -------------------------------------------------------------------------
@@ -532,8 +373,8 @@ class VisionTrainingArguments:
     output_dir: str = "./vision_aux_output"
     device: str = "cuda"
     tag: str = ""
-    keep_only_bbox: bool = False
-    bbox_loss: str = "bce"
+    keep_only_region: bool = False
+    region_loss: str = "bce"
     use_cls: bool = True
 
 
@@ -541,19 +382,19 @@ def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}_use_cls_{args.use_cls}" + args.tag
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_region_{args.keep_only_region}_region_loss_{args.region_loss}_use_cls_{args.use_cls}" + args.tag
     os.makedirs(output_dir, exist_ok=True)
     logger = setup_logger(
         log_file=os.path.join(output_dir,
-                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_bbox_{args.keep_only_bbox}_bbox_loss_{args.bbox_loss}_use_cls_{args.use_cls}.log"),
+                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_region_{args.keep_only_region}_region_loss_{args.region_loss}_use_cls_{args.use_cls}.log"),
         log_to_console=True
     )
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     # Example JSON paths for training
-    train_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_aux_v6_seed0.json"
-    val_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_aux_v6_seed0.json"
-    test_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_aux_v6_seed0.json"
+    train_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_aux_updated_v2_seed0.json"
+    val_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_aux_updated_v2_seed0.json"
+    test_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_aux_updated_v2_seed0.json"
 
     # -----------------------------------------------------------
     # 1) Load the base MLLM with a vision tower
@@ -591,19 +432,19 @@ def main():
     model = VisionAuxClassifier(
         vision_tower=vision_tower,
         num_modalities=4,
-        area_levels=10,      # e.g. 10 ordinal categories
-        extent_levels=6,     # e.g. 6 ordinal categories
-        solidity_levels=4,   # e.g. 4 ordinal categories
-        num_quadrants=27,     # e.g. 3x3x3 bounding box
+        area_levels=8,
+        shape_levels=7,
+        satellite_levels=5,
+        num_regions=11,
         use_cls=args.use_cls
     ).to(device)
 
     # -----------------------------------------------------------
     # 2) Build Datasets / Dataloaders
     # -----------------------------------------------------------
-    train_dataset = AuxVisionDataset(train_file, mode="train", num_quadrants=27)
-    val_dataset = AuxVisionDataset(val_file,   mode="val",   num_quadrants=27)
-    test_dataset = AuxVisionDataset(test_file,  mode="test",  num_quadrants=27)
+    train_dataset = AuxVisionDataset(train_file, mode="train", num_regions=11)
+    val_dataset = AuxVisionDataset(val_file, mode="val", num_regions=11)
+    test_dataset = AuxVisionDataset(test_file, mode="test", num_regions=11)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset,   batch_size=args.batch_size, shuffle=False)
@@ -625,9 +466,9 @@ def main():
         model.train()
         total_loss = 0.0
         area_loss = 0.0
-        extent_loss = 0.0
-        solidity_loss = 0.0
-        bbox_loss = 0.0
+        shape_loss = 0.0
+        satellite_loss = 0.0
+        region_loss = 0.0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1} [Train]"):
             mod1 = batch["t1c"].to(device)
             mod2 = batch["t1n"].to(device)
@@ -635,41 +476,41 @@ def main():
             mod4 = batch["t2w"].to(device)
 
             area_targets = batch["area_targets"].to(device)         # [B,4]
-            extent_targets = batch["extent_targets"].to(device)     # [B,4]
-            solidity_targets = batch["solidity_targets"].to(device) # [B,4]
-            bbox_targets = batch["bbox_targets"].to(device)         # [B,4,Q]
+            shape_targets = batch["shape_targets"].to(device)     # [B,4]
+            satellite_targets = batch["satellite_targets"].to(device) # [B,4]
+            region_targets = batch["region_targets"].to(device)         # [B,4,Q]
 
             optimizer.zero_grad()
-            area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
+            area_logits, shape_logits, satellite_logits, region_logits = model(mod1, mod2, mod3, mod4)
 
             loss, loss_dict = compute_aux_loss(
-                area_logits, extent_logits, solidity_logits, bbox_logits,
-                area_targets, extent_targets, solidity_targets, bbox_targets,
-                K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox,
-                bbox_loss=args.bbox_loss
+                area_logits, shape_logits, satellite_logits, region_logits,
+                area_targets, shape_targets, satellite_targets, region_targets,
+                K_area=10, K_shape=6, K_satellite=4, keep_only_region=args.keep_only_region,
+                region_loss=args.region_loss
             )
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
             area_loss += loss_dict["area_loss"]
-            extent_loss += loss_dict["extent_loss"]
-            solidity_loss += loss_dict["solidity_loss"]
-            bbox_loss += loss_dict["bbox_loss"]
+            shape_loss += loss_dict["shape_loss"]
+            satellite_loss += loss_dict["satellite_loss"]
+            region_loss += loss_dict["region_loss"]
 
         avg_train_loss = total_loss / len(train_loader)
         area_loss /= len(train_loader)
-        extent_loss /= len(train_loader)
-        solidity_loss /= len(train_loader)
-        bbox_loss /= len(train_loader)
+        shape_loss /= len(train_loader)
+        satellite_loss /= len(train_loader)
+        region_loss /= len(train_loader)
 
-        logger.info(f"Epoch {epoch+1} - Train Loss: {avg_train_loss:.4f} - Area Loss: {area_loss:.4f} - Extent Loss: {extent_loss:.4f} - Solidity Loss: {solidity_loss:.4f} - BBox Loss: {bbox_loss:.4f}")
+        logger.info(f"Epoch {epoch+1} - Train Loss: {avg_train_loss:.4f} - Area Loss: {area_loss:.4f} - Shape Loss: {shape_loss:.4f} - Satellite Loss: {satellite_loss:.4f} - Region Loss: {region_loss:.4f}")
 
         # Validation
         val_loss = 0.0
         area_val_loss = 0.0
-        extent_val_loss = 0.0
-        solidity_val_loss = 0.0
-        bbox_val_loss = 0.0
+        shape_val_loss = 0.0
+        satellite_val_loss = 0.0
+        region_val_loss = 0.0
         model.eval()
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Epoch {epoch+1} [Val]"):
@@ -679,30 +520,30 @@ def main():
                 mod4 = batch["t2w"].to(device)
 
                 area_targets = batch["area_targets"].to(device)
-                extent_targets = batch["extent_targets"].to(device)
-                solidity_targets = batch["solidity_targets"].to(device)
-                bbox_targets = batch["bbox_targets"].to(device)
+                shape_targets = batch["shape_targets"].to(device)
+                satellite_targets = batch["satellite_targets"].to(device)
+                region_targets = batch["region_targets"].to(device)
 
-                area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
+                area_logits, shape_logits, satellite_logits, region_logits = model(mod1, mod2, mod3, mod4)
                 loss, loss_dict = compute_aux_loss(
-                    area_logits, extent_logits, solidity_logits, bbox_logits,
-                    area_targets, extent_targets, solidity_targets, bbox_targets,
-                    K_area=10, K_extent=6, K_solidity=4, keep_only_bbox=args.keep_only_bbox,
-                    bbox_loss=args.bbox_loss
+                    area_logits, shape_logits, satellite_logits, region_logits,
+                    area_targets, shape_targets, satellite_targets, region_targets,
+                    K_area=10, K_shape=7, K_satellite=5, keep_only_region=args.keep_only_region,
+                    region_loss=args.region_loss
                 )
                 area_val_loss += loss_dict["area_loss"]
-                extent_val_loss += loss_dict["extent_loss"]
-                solidity_val_loss += loss_dict["solidity_loss"]
-                bbox_val_loss += loss_dict["bbox_loss"]
+                shape_val_loss += loss_dict["shape_loss"]
+                satellite_val_loss += loss_dict["satellite_loss"]
+                region_val_loss += loss_dict["region_loss"]
 
                 val_loss += loss.item()
 
         area_val_loss /= len(val_loader)
-        extent_val_loss /= len(val_loader)
-        solidity_val_loss /= len(val_loader)
-        bbox_val_loss /= len(val_loader)
+        shape_val_loss /= len(val_loader)
+        satellite_val_loss /= len(val_loader)
+        region_val_loss /= len(val_loader)
         val_loss /= len(val_loader)
-        logger.info(f"Epoch {epoch+1} - Val Loss: {val_loss:.4f} - Area Loss: {area_val_loss:.4f} - Extent Loss: {extent_val_loss:.4f} - Solidity Loss: {solidity_val_loss:.4f} - BBox Loss: {bbox_val_loss:.4f}")
+        logger.info(f"Epoch {epoch+1} - Val Loss: {val_loss:.4f} - Area Loss: {area_val_loss:.4f} - Shape Loss: {shape_val_loss:.4f} - Satellite Loss: {satellite_val_loss:.4f} - Region Loss: {region_val_loss:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -718,15 +559,12 @@ def main():
     model.load_state_dict(torch.load(best_model_path))
     model.eval()
 
-    # We'll compute ordinal metrics for area, extent, solidity (e.g. MAE)
-    # We'll do IoU for bbox
-
     all_area_preds = []
     all_area_tgts  = []
-    all_extent_preds = []
-    all_extent_tgts  = []
-    all_solidity_preds = []
-    all_solidity_tgts  = []
+    all_shape_preds = []
+    all_shape_tgts  = []
+    all_satellite_preds = []
+    all_satellite_tgts  = []
     thresh = [-.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, .9, 1.0, 1.1]
     thresh_iou_list = [dict() for _ in range(4)]
 
@@ -738,40 +576,37 @@ def main():
             mod4 = batch["t2w"].to(device)
 
             area_targets = batch["area_targets"].to(device)         # [B,4]
-            extent_targets = batch["extent_targets"].to(device)     # [B,4]
-            solidity_targets = batch["solidity_targets"].to(device) # [B,4]
-            bbox_targets = batch["bbox_targets"].to(device)         # [B,4,Q]
+            shape_targets = batch["shape_targets"].to(device)     # [B,4]
+            satellite_targets = batch["satellite_targets"].to(device) # [B,4]
+            region_targets = batch["region_targets"].to(device)         # [B,4,Q]
 
-            area_logits, extent_logits, solidity_logits, bbox_logits = model(mod1, mod2, mod3, mod4)
+            area_logits, shape_logits, satellite_logits, region_logits = model(mod1, mod2, mod3, mod4)
 
-            # 1) Area CORAL => [B,4,9]
             B = area_logits.size(0)
-            area_2d = area_logits.view(B*4, 9)              # => [B*4,9]
-            area_pred_1d = coral_predict(area_2d, K=10)     # => [B*4]
+            area_2d = area_logits.view(B*4, 7)              # => [B*4,9]
+            area_pred_1d = coral_predict(area_2d)     # => [B*4]
             area_tgt_1d = area_targets.view(-1)             # => [B*4]
             all_area_preds.append(area_pred_1d.cpu())
             all_area_tgts.append(area_tgt_1d.cpu())
 
-            # 2) Extent => [B,4,5]
-            extent_2d = extent_logits.view(B*4, 5)
-            extent_pred_1d = coral_predict(extent_2d, K=6)  # => [B*4]
-            extent_tgt_1d = extent_targets.view(-1)
-            all_extent_preds.append(extent_pred_1d.cpu())
-            all_extent_tgts.append(extent_tgt_1d.cpu())
+            shape_2d = shape_logits.view(B*4, 7)
+            shape_pred_1d = ce_predict(shape_2d)  # => [B*4]
+            shape_tgt_1d = shape_targets.view(-1)
+            all_shape_preds.append(shape_pred_1d.cpu())
+            all_shape_tgts.append(shape_tgt_1d.cpu())
 
-            # 3) Solidity => [B,4,3]
-            solidity_2d = solidity_logits.view(B*4, 3)
-            solidity_pred_1d = coral_predict(solidity_2d, K=4) # => [B*4]
-            solidity_tgt_1d = solidity_targets.view(-1)
-            all_solidity_preds.append(solidity_pred_1d.cpu())
-            all_solidity_tgts.append(solidity_tgt_1d.cpu())
+            satellite_2d = satellite_logits.view(B*4, 5)
+            satellite_pred_1d = ce_predict(satellite_2d)
+            satellite_tgt_1d = satellite_targets.view(-1)
+            all_satellite_preds.append(satellite_pred_1d.cpu())
+            all_satellite_tgts.append(satellite_tgt_1d.cpu())
 
             # 4) BBox => IoU
-            bbox_prob = torch.sigmoid(bbox_logits)  # shape [B,4,Q], in [0..1]
+            region_prob = torch.sigmoid(region_logits)  # shape [B,4,Q], in [0..1]
             for thresh_ in thresh:
-                bbox_pred = (bbox_prob >= thresh_).float()  # hard threshold -> 0/1
-                intersection = (bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
-                union = (bbox_pred + bbox_targets - bbox_pred * bbox_targets).sum(dim=2)  # [B,4]
+                region_pred = (region_prob >= thresh_).float()  # hard threshold -> 0/1
+                intersection = (region_pred * region_targets).sum(dim=2)  # [B,4]
+                union = (region_pred + region_targets - region_pred * region_targets).sum(dim=2)  # [B,4]
                 iou = (intersection + 1e-7)/ (union + 1e-7)  # [B,4]
                 for label_index in range(4):
                     if thresh_ not in thresh_iou_list[label_index]:
@@ -781,10 +616,10 @@ def main():
     # stack predictions
     area_preds = torch.cat(all_area_preds).numpy()
     area_tgts  = torch.cat(all_area_tgts).numpy()
-    extent_preds = torch.cat(all_extent_preds).numpy()
-    extent_tgts  = torch.cat(all_extent_tgts).numpy()
-    solidity_preds = torch.cat(all_solidity_preds).numpy()
-    solidity_tgts  = torch.cat(all_solidity_tgts).numpy()
+    shape_preds = torch.cat(all_shape_preds).numpy()
+    shape_tgts  = torch.cat(all_shape_tgts).numpy()
+    satellite_preds = torch.cat(all_satellite_preds).numpy()
+    satellite_tgts  = torch.cat(all_satellite_tgts).numpy()
     thresh_mean_iou = [dict() for _ in range(4)]
     for label_index in range(4):
         for thresh_ in thresh:
@@ -792,13 +627,13 @@ def main():
             thresh_mean_iou[label_index][thresh_] = iou_tensor.mean().item()
     # Simple metrics: Mean Absolute Error for ordinal
     area_mae = mean_absolute_error(area_tgts, area_preds)
-    extent_mae = mean_absolute_error(extent_tgts, extent_preds)
-    solidity_mae = mean_absolute_error(solidity_tgts, solidity_preds)
+    shape_acc = (shape_tgts == shape_preds).mean()
+    satellite_acc = (satellite_tgts == satellite_preds).mean()
 
     logger.info("========== TEST RESULTS ==========")
     logger.info(f"Area MAE:     {area_mae:.4f}")
-    logger.info(f"Extent MAE:   {extent_mae:.4f}")
-    logger.info(f"Solidity MAE: {solidity_mae:.4f}")
+    logger.info(f"Shape Acc:   {shape_acc:.4f}")
+    logger.info(f"Satellite Acc: {satellite_acc:.4f}")
     for label_index in range(4):
         logger.info(f"Label: {label_index}")
         [logger.info(f"\t{thresh_} BBox Mean IoU :{thresh_mean_iou[label_index][thresh_]:.4f}") for thresh_ in thresh]
