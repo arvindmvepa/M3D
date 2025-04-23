@@ -528,7 +528,7 @@ def main():
                 loss, loss_dict = compute_aux_loss(
                     area_logits, shape_logits, satellite_logits, region_logits,
                     area_targets, shape_targets, satellite_targets, region_targets,
-                    K_area=10, K_shape=7, K_satellite=5, keep_only_region=args.keep_only_region,
+                    K_area=8, K_shape=7, K_satellite=5, keep_only_region=args.keep_only_region,
                     region_loss=args.region_loss
                 )
                 area_val_loss += loss_dict["area_loss"]
