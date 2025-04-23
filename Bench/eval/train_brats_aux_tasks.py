@@ -120,7 +120,7 @@ def ce_loss(logits, labels):
 def compute_aux_loss(
     area_logits, shape_logits, satellite_logits, region_logits,
     area_targets, shape_targets, satellite_targets, region_targets,
-    K_area=8, K_shape=7, K_satellite=5, keep_only_region=False,
+    K_area=10, K_shape=7, K_satellite=5, keep_only_region=False,
     region_loss="bce"
 ):
     B = area_logits.size(0)
@@ -486,7 +486,7 @@ def main():
             loss, loss_dict = compute_aux_loss(
                 area_logits, shape_logits, satellite_logits, region_logits,
                 area_targets, shape_targets, satellite_targets, region_targets,
-                K_area=10, K_shape=6, K_satellite=4, keep_only_region=args.keep_only_region,
+                K_area=8, K_shape=7, K_satellite=5, keep_only_region=args.keep_only_region,
                 region_loss=args.region_loss
             )
             loss.backward()
