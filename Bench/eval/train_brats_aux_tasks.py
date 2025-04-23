@@ -249,9 +249,9 @@ class AuxVisionDataset(Dataset):
             "t2f": mod_t2f,
             "t2w": mod_t2w,
             "area_targets": area_vals,         # [4]
-            "extent_targets": shape_vals,     # [4]
-            "solidity_targets": satellite_vals, # [4]
-            "bbox_targets": region_vals,         # [4,num_quadrants]
+            "shape_targets": shape_vals,     # [4]
+            "satellite_targets": satellite_vals, # [4]
+            "region_targets": region_vals,         # [4,regions]
             "seg_file": seg_file
         }
 
