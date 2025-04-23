@@ -131,12 +131,12 @@ def compute_aux_loss(
 
     shape_2d = shape_logits.view(B * 4, K_shape)
     shape_tgt_1d = shape_targets.view(B * 4)
-    shape_loss = ce_loss(shape_2d, shape_tgt_1d, K_shape)
+    shape_loss = ce_loss(shape_2d, shape_tgt_1d)
 
     # solidity => [B*4,(K_solidity-1)]
     satellite_2d = satellite_logits.view(B * 4, K_satellite)
     satellite_tgt_1d = satellite_targets.view(B * 4)
-    satellite_loss = ce_loss(satellite_2d, satellite_tgt_1d, K_satellite)
+    satellite_loss = ce_loss(satellite_2d, satellite_tgt_1d)
 
     if region_loss == "bce":
         region_loss = bce_loss(region_logits, region_targets)
