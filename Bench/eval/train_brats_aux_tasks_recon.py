@@ -713,9 +713,9 @@ def main():
     cross_modality_matrix[2, 0] = 1.5  # T2f -> T1c
     cross_modality_matrix[2, 1] = 1.5  # T2f -> T1n 
     cross_modality_matrix[2, 3] = 1.5  # T2f -> T2w
-    cross_modality_matrix[0, 1] = 1.2  # T2f -> T1c
-    cross_modality_matrix[0, 2] = 1.2  # T2f -> T1n 
-    cross_modality_matrix[0, 3] = 1.2  # T2f -> T2w
+    cross_modality_matrix[0, 1] = 1.0  # T2f -> T1c
+    cross_modality_matrix[0, 2] = 1.0  # T2f -> T1n 
+    cross_modality_matrix[0, 3] = 1.0  # T2f -> T2w
     
     # Define modality weights for self-reconstruction (give T2F higher weight)
     modality_weights = [1.0, 1.0, 2.0, 1.0]

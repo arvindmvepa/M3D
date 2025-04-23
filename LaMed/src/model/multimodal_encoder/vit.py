@@ -17,9 +17,188 @@ import torch
 import torch.nn as nn
 import random
 import torch.nn.functional as F
+import numpy as np
+import math
 
 from monai.networks.blocks.patchembedding import PatchEmbeddingBlock
 from monai.networks.blocks.transformerblock import TransformerBlock
+
+class CrossAttentionFusionModule(nn.Module):
+    """
+    Uses cross-attention mechanism to incorporate reference features into source features.
+    This allows the model to selectively focus on relevant parts of the reference.
+    """
+    def __init__(self, hidden_size=768, num_heads=8):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
+        
+        # Multi-head attention components
+        self.q_proj = nn.Linear(hidden_size, hidden_size)
+        self.k_proj = nn.Linear(hidden_size, hidden_size)
+        self.v_proj = nn.Linear(hidden_size, hidden_size)
+        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        
+        # Normalization and feed-forward network
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size * 4),
+            nn.GELU(),
+            nn.Linear(hidden_size * 4, hidden_size)
+        )
+
+    def forward(self, source_features, reference_features):
+        """
+        Args:
+            source_features: Features from source modality [B, num_patches, hidden_size]
+            reference_features: Features from reference modality [B, num_ref_patches, hidden_size]
+        """
+        # Cross-attention mechanism (source attends to reference)
+        q = self.q_proj(source_features)  # queries from source
+        k = self.k_proj(reference_features)  # keys from reference
+        v = self.v_proj(reference_features)  # values from reference
+        
+        # Reshape for multi-head attention
+        B, N, C = q.shape
+        q = q.view(B, N, self.num_heads, self.head_dim).transpose(1, 2)  # [B, num_heads, N, head_dim]
+        B_ref, N_ref, C_ref = k.shape  
+        k = k.view(B_ref, N_ref, self.num_heads, self.head_dim).transpose(1, 2)  # [B, num_heads, N_ref, head_dim]
+        v = v.view(B_ref, N_ref, self.num_heads, self.head_dim).transpose(1, 2)  # [B, num_heads, N_ref, head_dim]
+        
+        # Attention computation
+        attn = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)  # [B, num_heads, N, N_ref]
+        attn = F.softmax(attn, dim=-1)
+        
+        # Apply attention to values
+        out = (attn @ v).transpose(1, 2).reshape(B, N, C)  # [B, N, C]
+        out = self.out_proj(out)
+        
+        # Residual connection and layer norm
+        source_features = source_features + out
+        source_features = self.norm1(source_features)
+        
+        # Feed-forward network
+        ff_out = self.ffn(source_features)
+        source_features = source_features + ff_out
+        source_features = self.norm2(source_features)
+        
+        return source_features
+
+
+class GatedFusionModule(nn.Module):
+    """
+    Uses gating mechanism to control how much reference information to incorporate.
+    The gate adaptively balances the source and reference features.
+    """
+    def __init__(self, hidden_size=768):
+        super().__init__()
+        self.hidden_size = hidden_size
+        
+        # Transform source and reference features
+        self.source_transform = nn.Linear(hidden_size, hidden_size)
+        self.ref_transform = nn.Linear(hidden_size, hidden_size)
+        
+        # Gate controller
+        self.gate = nn.Linear(hidden_size * 2, hidden_size)
+        
+        # Output projection and normalization
+        self.output_proj = nn.Linear(hidden_size, hidden_size)
+        self.norm = nn.LayerNorm(hidden_size)
+        
+    def forward(self, source_features, reference_features):
+        """
+        Args:
+            source_features: Features from source modality [B, num_patches, hidden_size]
+            reference_features: Features from reference modality [B, num_ref_patches, hidden_size]
+        """
+        # Transform features
+        transformed_source = self.source_transform(source_features)
+        
+        # If reference features have different sequence length, adapt them
+        B, N, C = source_features.shape
+        B_ref, N_ref, C_ref = reference_features.shape
+        
+        # Average reference features if there are multiple reference patches
+        if N_ref != N:
+            # Option 1: Average all reference features to match source shape
+            reference_features = reference_features.mean(dim=1, keepdim=True).expand(B, N, C)
+        
+        transformed_ref = self.ref_transform(reference_features)
+        
+        # Compute gate values (sigmoid between 0 and 1)
+        # 0 means ignore reference, 1 means fully use reference
+        gate_input = torch.cat([source_features, reference_features], dim=-1)
+        gate_value = torch.sigmoid(self.gate(gate_input))
+        
+        # Combine features based on gate value
+        fused_features = gate_value * transformed_ref + (1 - gate_value) * transformed_source
+        
+        # Final projection and normalization
+        output = self.output_proj(fused_features)
+        output = self.norm(output + source_features)  # Residual connection
+        
+        return output
+
+
+class FiLMConditioningModule(nn.Module):
+    """
+    Feature-wise Linear Modulation (FiLM) conditions source features using reference features.
+    FiLM applies an affine transformation to features, with parameters generated from the reference.
+    """
+    def __init__(self, hidden_size=768):
+        super().__init__()
+        self.hidden_size = hidden_size
+        
+        # FiLM parameter generator (generates scale and shift from reference)
+        self.film_generator = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size*2),
+            nn.LayerNorm(hidden_size*2),
+            nn.GELU(),
+            nn.Linear(hidden_size*2, hidden_size*2)  # Generate scale and shift parameters
+        )
+        
+        # Output projection and normalization
+        self.output_proj = nn.Linear(hidden_size, hidden_size)
+        self.norm = nn.LayerNorm(hidden_size)
+        
+    def forward(self, source_features, reference_features):
+        """
+        Args:
+            source_features: Features from source modality [B, num_patches, hidden_size]
+            reference_features: Features from reference modality [B, num_ref_patches, hidden_size]
+        """
+        B, N, C = source_features.shape
+        B_ref, N_ref, C_ref = reference_features.shape
+        
+        # Average reference features if there are multiple patches
+        if N_ref > 1:
+            reference_features = reference_features.mean(dim=1)  # [B, hidden_size]
+        else:
+            reference_features = reference_features.squeeze(1)  # [B, hidden_size]
+            
+        # Generate FiLM parameters from reference
+        film_params = self.film_generator(reference_features)  # [B, hidden_size*2]
+        
+        # Split into scale and shift parameters
+        gamma = film_params[:, :self.hidden_size].unsqueeze(1)  # [B, 1, hidden_size]
+        beta = film_params[:, self.hidden_size:].unsqueeze(1)  # [B, 1, hidden_size]
+        
+        # Apply FiLM conditioning: scale and shift the source features
+        # Expand gamma and beta to match source features shape
+        gamma = gamma.expand_as(source_features)  # [B, N, hidden_size]
+        beta = beta.expand_as(source_features)  # [B, N, hidden_size]
+        
+        # Apply the affine transformation
+        film_conditioned = gamma * source_features + beta
+        
+        # Final projection with residual connection
+        output = self.output_proj(film_conditioned)
+        output = self.norm(output + source_features)
+        
+        return output
+
 
 class ViT(nn.Module):
     """
@@ -176,13 +355,10 @@ class ViT(nn.Module):
 #     @property
 #     def hidden_size(self):
 #         return self.vision_tower.hidden_size
-
-
-
-
+    
 class VisionReconstructionDecoder(nn.Module):
     """Decoder for reconstruction self-supervised learning task."""
-    def __init__(self, hidden_size=768, patch_size=(16, 16, 16), image_size=(128, 128, 128)):
+    def __init__(self, hidden_size=768, patch_size=(4, 16, 16), image_size=(128, 128, 128)):
         super().__init__()
         self.hidden_size = hidden_size
         
@@ -231,6 +407,73 @@ class VisionReconstructionDecoder(nn.Module):
         reconstructed_patches = self.decoder(x)  # [B, num_patches, patch_volume]
         return reconstructed_patches
         
+class ReferenceGuidedCrossModalDecoder(nn.Module):
+    def __init__(self, source_mod, target_mod, hidden_size=768, patch_volume=1024, fusion_method='cross_attention'):
+        super().__init__()
+        self.source_mod = source_mod
+        self.target_mod = target_mod
+        self.patch_volume = patch_volume
+        self.fusion_method = fusion_method
+        
+        # Create appropriate fusion module based on specified method
+        if fusion_method == 'cross_attention':
+            self.fusion_module = CrossAttentionFusionModule(hidden_size)
+        elif fusion_method == 'gated':
+            self.fusion_module = GatedFusionModule(hidden_size)
+        elif fusion_method == 'film':
+            self.fusion_module = FiLMConditioningModule(hidden_size)
+        else:
+            raise ValueError(f"Unknown fusion method: {fusion_method}")
+        
+        # Enhanced decoder with more capacity
+        self.decoder = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size * 2),
+            nn.LayerNorm(hidden_size * 2),
+            nn.GELU(),
+            nn.Dropout(0.1),  # Add dropout for regularization
+            nn.Linear(hidden_size * 2, hidden_size * 4),
+            nn.GELU(),
+            nn.Dropout(0.1),  # Add dropout for regularization
+            nn.Linear(hidden_size * 4, self.patch_volume)
+        )
+    
+    def forward(self, source_features, reference_features=None):
+        if reference_features is None:
+            # Fallback to standard decoding if no reference available
+            return self.decoder(source_features)
+        
+        # Apply the selected fusion method to combine source and reference features
+        fused_features = self.fusion_module(source_features, reference_features)
+        
+        # Decode the fused features
+        return self.decoder(fused_features)
+
+
+class CrossModalAttention(nn.Module):
+    def __init__(self, hidden_size=768):
+        super().__init__()
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key = nn.Linear(hidden_size, hidden_size)
+        self.value = nn.Linear(hidden_size, hidden_size)
+        self.output = nn.Linear(hidden_size, hidden_size)
+        
+    def forward(self, source_feats, target_feats):
+        """
+        Attend from source features to target features
+        """
+        q = self.query(source_feats)
+        k = self.key(target_feats)
+        v = self.value(target_feats)
+        
+        # Compute attention scores
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(k.size(-1))
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        
+        # Apply attention
+        context = torch.matmul(attn_probs, v)
+        output = self.output(context)
+        
+        return output
 
 class ViT3DTower(nn.Module):
     def __init__(self, config):
@@ -242,6 +485,7 @@ class ViT3DTower(nn.Module):
         
         # Calculate important dimensions for patching
         pd, ph, pw = self.patch_size
+        self.patch_volume = pd * ph * pw
         i_d, i_h, i_w = self.config.image_size
         self.num_patches_d = i_d // pd
         self.num_patches_h = i_h // ph
@@ -282,28 +526,34 @@ class ViT3DTower(nn.Module):
             self.cross_modality_matrix = self.config.cross_modality_matrix
             self._create_cross_modal_decoders(self.cross_modality_matrix)
         
-    
     def _create_cross_modal_decoders(self, cross_modality_matrix):
         """
-        Create cross-modal decoders based on non-zero entries in the cross-modality matrix.
+        Create reference-guided cross-modal decoders based on non-zero entries in the cross-modality matrix.
         """
         matrix = cross_modality_matrix.cpu().numpy()
+        modality_names = ['T1c', 'T1n', 'T2f', 'T2w']
         
         for i in range(matrix.shape[0]):
             for j in range(matrix.shape[1]):
                 if i != j and matrix[i, j] > 0:  # Skip self-reconstruction and zero-weighted pairs
                     key = f'{i}_to_{j}'
-                    self.cross_decoders[key] = VisionReconstructionDecoder(
+                    source_mod = modality_names[i]
+                    target_mod = modality_names[j]
+                    self.cross_decoders[key] = ReferenceGuidedCrossModalDecoder(
+                        source_mod=source_mod,
+                        target_mod=target_mod,
                         hidden_size=768,
-                        patch_size=self.config.patch_size,
-                        image_size=self.config.image_size
+                        patch_volume=self.patch_volume,
+                        fusion_method='film'
                     )
         
         if len(self.cross_decoders) > 0:
-            print(f"Created {len(self.cross_decoders)} cross-modal decoders:")
+            print(f"Created {len(self.cross_decoders)} reference-guided cross-modal decoders:")
             for key in self.cross_decoders.keys():
                 source, target = key.split('_to_')
-                print(f"  - Modality {source} → Modality {target}")
+                source_mod = modality_names[int(source)]
+                target_mod = modality_names[int(target)]
+                print(f"  - {source_mod} → {target_mod}")
 
     def extract_image_patches(self, images):
         """
@@ -327,11 +577,9 @@ class ViT3DTower(nn.Module):
         
         return patches
 
-
     def mask_input_patches(self, images):
         """
-        Mask patches preferentially from center regions of the image
-        
+        Mask random patches of the input image directly
         Args:
             images: [B, C, D, H, W]
         Returns:
@@ -353,41 +601,16 @@ class ViT3DTower(nn.Module):
         # Create a copy of images to apply masking
         masked_images = images.clone()
         
-        # Define center region - typically in brain MRI the center 60% contains most of the tissue
-        center_d_start, center_d_end = int(0.2 * nd), int(0.8 * nd)
-        center_h_start, center_h_end = int(0.2 * nh), int(0.8 * nh)
-        center_w_start, center_w_end = int(0.2 * nw), int(0.8 * nw)
-        
-        # Create a list of center patch indices
-        center_patch_indices = []
-        for d_idx in range(center_d_start, center_d_end):
-            for h_idx in range(center_h_start, center_h_end):
-                for w_idx in range(center_w_start, center_w_end):
-                    # Convert 3D position to flat index
-                    idx = d_idx * (nh * nw) + h_idx * nw + w_idx
-                    center_patch_indices.append(idx)
-        
-        # Convert to tensor
-        center_patch_indices = torch.tensor(center_patch_indices, device=images.device)
-        
-        # Mask indices for each batch
+        # Randomly select patches to mask
         mask_indices = []
         for b in range(B):
-            # Calculate how many patches to mask
-            num_mask = min(int(num_patches * self.mask_ratio), len(center_patch_indices))
-            
-            if len(center_patch_indices) > 0:
-                # Randomly select indices from center patches
-                perm = torch.randperm(len(center_patch_indices), device=images.device)
-                mask_idx = center_patch_indices[perm[:num_mask]]
-            else:
-                # Fall back to random selection if no center patches
-                perm = torch.randperm(num_patches, device=images.device)
-                mask_idx = perm[:num_mask]
-            
+            # Generate random indices for masking
+            perm = torch.randperm(num_patches, device=images.device)
+            num_mask = int(num_patches * self.mask_ratio)
+            mask_idx = perm[:num_mask]
             mask_indices.append(mask_idx)
             
-            # Apply masking to the image
+            # For each masked patch index, calculate its position in the original image
             for idx in mask_idx:
                 # Convert flat index to 3D position
                 d_idx = idx // (nh * nw)
@@ -415,20 +638,28 @@ class ViT3DTower(nn.Module):
         return masked_images, original_patches, mask_indices, patch_positions
 
     def forward_mim_multimodal(self, mod1, mod2, mod3, mod4, apply_mask=True):
-        """
-        Forward method for multimodal Masked Image Modeling
-        Args:
-            mod1, mod2, mod3, mod4: Input images for different modalities [B, C, D, H, W]
-            apply_mask: Whether to apply masking
-        Returns:
-            Dictionary with features and reconstructions for all modalities
-        """
         B = mod1.shape[0]
         
         modalities = [mod1, mod2, mod3, mod4]
         modality_results = []
         
-        # Process each modality
+        # Generate a single set of mask indices to use for all modalities
+        if apply_mask:
+            # Calculate total number of patches
+            pd, ph, pw = self.patch_size
+            D, H, W = mod1.shape[2:]
+            nd, nh, nw = D // pd, H // ph, W // pw
+            num_patches = nd * nh * nw
+            
+            # Generate shared mask indices for all modalities
+            shared_mask_indices = []
+            for b in range(B):
+                perm = torch.randperm(num_patches, device=mod1.device)
+                num_mask = int(num_patches * self.mask_ratio)
+                mask_idx = perm[:num_mask]
+                shared_mask_indices.append(mask_idx)
+        
+        # Process each modality with the same mask
         for mod_idx, mod in enumerate(modalities):
             if not apply_mask:
                 # Standard forward pass without masking
@@ -436,8 +667,37 @@ class ViT3DTower(nn.Module):
                 modality_results.append({'features': features})
                 continue
             
-            # 1. Mask random patches in the input image
-            masked_images, original_patches, mask_indices, patch_positions = self.mask_input_patches(mod)
+            # 1. Apply shared masking to input image
+            masked_images = mod.clone()
+            original_patches = self.extract_image_patches(mod)
+            patch_positions = []
+            
+            # Number of patches in each dimension
+            pd, ph, pw = self.patch_size
+            D, H, W = mod.shape[2:]
+            nd, nh, nw = D // pd, H // ph, W // pw
+            
+            # Store patch positions for reference
+            for idx in range(num_patches):
+                d_idx = idx // (nh * nw)
+                hw_idx = idx % (nh * nw)
+                h_idx = hw_idx // nw
+                w_idx = hw_idx % nw
+                patch_positions.append((d_idx, h_idx, w_idx))
+            
+            # Apply masking using the shared mask indices
+            for b in range(B):
+                for idx in shared_mask_indices[b]:
+                    # Convert flat index to 3D position
+                    d_idx, h_idx, w_idx = patch_positions[idx]
+                    
+                    # Calculate starting position in the original image
+                    d_start = d_idx * pd
+                    h_start = h_idx * ph
+                    w_start = w_idx * pw
+                    
+                    # Set the patch to zero (mask it)
+                    masked_images[b, :, d_start:d_start+pd, h_start:h_start+ph, w_start:w_start+pw] = 0.0
             
             # 2. Forward pass with masked images
             features, hidden_states = self.vision_tower(masked_images)
@@ -452,25 +712,31 @@ class ViT3DTower(nn.Module):
             
             # 4. Reconstruct patches using the appropriate decoder
             reconstructed_patches = self.decoders[mod_idx](patch_tokens)
-            
             modality_results.append({
                 'features': features,
                 'original_patches': original_patches,
                 'reconstructed_patches': reconstructed_patches,
-                'mask_indices': mask_indices,
+                'mask_indices': shared_mask_indices,  # Using shared mask indices
                 'patch_positions': patch_positions,
                 'masked_images': masked_images
             })
-        
-        # 5. Cross-modal reconstruction based on cross-modal decoders
+            
+        # 5. Cross-modal reconstruction with consistent masking
         cross_reconstructed = {}
         if apply_mask and len(self.cross_decoders) > 0:
             for key, decoder in self.cross_decoders.items():
                 source_idx, target_idx = map(int, key.split('_to_'))
+                
+                # Get source and target features
                 source_features = modality_results[source_idx]['features']
+                target_features = modality_results[target_idx]['features']
+                
+                # Use the same tokens for corresponding positions
                 source_patch_tokens = source_features[:, 1:]  # Exclude CLS token
-                cross_reconstructed[key] = decoder(source_patch_tokens)
-        
+                target_patch_tokens = target_features[:, 1:]  # Exclude CLS token
+                
+                # Perform cross-modal reconstruction using aligned features
+                cross_reconstructed[key] = decoder(source_patch_tokens, target_patch_tokens)
         combined_results = {
             'modality_results': modality_results,
             'cross_reconstructed': cross_reconstructed

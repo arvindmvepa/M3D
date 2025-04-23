@@ -370,7 +370,7 @@ def visualize_full_reconstruction(modality_results, modality_names=["T1c", "T1n"
         # Save as GIF (requires imageio)
         try:
             import imageio
-            imageio.mimsave(os.path.join(save_dir, f"reconstruction_animation_{mod_name}_batch{batch_idx}.gif"), 
+            imageio.mimsave(os.path.join(save_dir, f"self_reconstruction_{mod_name}_batch{batch_idx}.gif"), 
                            all_slices, fps=5)
             print(f"Saved animation for {mod_name}")
         except ImportError:
@@ -429,7 +429,6 @@ def reconstruct_full_image(masked_images, reconstructed_patches, mask_indices, p
                         reconstructed_images[b, 0, d_start:d_start+pd, h_start:h_start+ph, w_start:w_start+pw] = patch
     
     return reconstructed_images
-
 
 def visualize_cross_modal_full_reconstruction(original_images_dict, cross_recon_dict, mask_indices_list, 
                                             patch_positions_list, modality_names=["T1c", "T1n", "T2f", "T2w"],
@@ -576,6 +575,59 @@ def visualize_cross_modal_full_reconstruction(original_images_dict, cross_recon_
         plt.tight_layout()
         plt.savefig(os.path.join(save_dir, f"cross_modal_error_map_{source_name}_to_{target_name}_batch{batch_idx}.png"), dpi=300)
         plt.close()
+
+        # CREATE AND SAVE GIF ANIMATION (NEW CODE)
+        # Create an animated GIF of all slices
+        all_slices = []
+        for d in range(actual_D):
+            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+            
+            # Original target image
+            axes[0].imshow(original_target_image[0, 0, d].cpu().numpy(), cmap='gray')
+            axes[0].set_title(f"Original {target_name} - Slice {d}")
+            
+            # Masked target image 
+            axes[1].imshow(masked_target_image[0, 0, d].cpu().numpy(), cmap='gray')
+            axes[1].set_title(f"Masked {target_name} - Slice {d}")
+            
+            # Cross-reconstructed image
+            axes[2].imshow(reconstructed_target_image[0, 0, d].cpu().numpy(), cmap='gray')
+            axes[2].set_title(f"{source_name} → {target_name} - Slice {d}")
+            
+            plt.tight_layout()
+            plt.suptitle(f"Cross-Modal Reconstruction: {source_name} → {target_name}, Slice {d} of {actual_D}", y=1.02)
+            
+            # Save to buffer
+            fig.canvas.draw()
+            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            all_slices.append(image)
+            plt.close()
+        
+        # Save as GIF (requires imageio)
+        try:
+            import imageio
+            imageio.mimsave(os.path.join(save_dir, f"cross_modal_reconstruction_{source_name}_to_{target_name}_batch{batch_idx}.gif"), 
+                           all_slices, fps=5)
+            print(f"Saved cross-modal animation for {source_name} → {target_name}")
+        except ImportError:
+            print("imageio not installed. Skipping animation creation.")
+        
+        # Create error map animation (optional)
+        error_slices = []
+        for d in range(actual_D):
+            fig, ax = plt.subplots(figsize=(8, 8))
+            error_slice = error_map[0, 0, d].cpu().numpy()
+            im = ax.imshow(error_slice, cmap='hot', vmax=np.percentile(error_slice, 99))
+            ax.set_title(f"Error Map: {source_name} → {target_name} - Slice {d}")
+            plt.colorbar(im, ax=ax)
+            
+            # Save to buffer
+            fig.canvas.draw()
+            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            error_slices.append(image)
+            plt.close()
         
         print(f"Cross-Modal: {source_name} → {target_name}")
         print(f"Masked Region MSE: {mse:.6f}")
@@ -590,8 +642,8 @@ def main():
     # Configuration
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     test_file = "/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_aux_v6_seed0.json"
-    model_path = "/local2/jrgan/NephrologyKG/M3D/vision_aux_output_recon_model_name_pretrained_ViT.bin_freeze_vision_False_epochs_30_keep_only_bbox_False_bbox_loss_bce_use_cls_True_mask0.31121_selfonly_1011_m0.3_mim/best_model.pt"
-    # model_path = "/local2/jrgan/NephrologyKG/M3D/vision_aux_output_recon_model_name_pretrained_ViT.bin_freeze_vision_False_epochs_30_keep_only_bbox_False_bbox_loss_bce_use_cls_True_mask0.31121_01.2_21.5_1011_m0.3_mim/best_model.pt"
+    # model_path = "/local2/jrgan/NephrologyKG/M3D/vision_aux_output_recon_model_name_pretrained_ViT.bin_freeze_vision_False_epochs_30_keep_only_bbox_False_bbox_loss_bce_use_cls_True_mask0.31121_01.2_21.5_1011_m0.3center_mim_ref/best_model.pt"
+    model_path = "/local2/jrgan/NephrologyKG/M3D/vision_aux_output_recon_model_name_pretrained_ViT.bin_freeze_vision_False_epochs_30_keep_only_bbox_False_bbox_loss_bce_use_cls_True_mask0.31121_t2f1_1011_m0.3_mim_ref_gated_sameseq/best_model.pt"
     base_model_path = "GoodBaiBai88/M3D-LaMed-Phi-3-4B"
     output_dir = "visualization_results_full"
     os.makedirs(output_dir, exist_ok=True)
@@ -617,12 +669,12 @@ def main():
     cross_modality_matrix = torch.zeros((4, 4))
     for i in range(4):
         cross_modality_matrix[i][i] = 0.0
-    # cross_modality_matrix[2, 0] = 1.5  # T2f -> T1c
-    # cross_modality_matrix[2, 1] = 1.5  # T2f -> T1n 
-    # cross_modality_matrix[2, 3] = 1.5  # T2f -> T2w
-    # cross_modality_matrix[0, 1] = 1.2  # T2f -> T1c
-    # cross_modality_matrix[0, 2] = 1.2  # T2f -> T1n 
-    # cross_modality_matrix[0, 3] = 1.2  # T2f -> T2w
+    cross_modality_matrix[2, 0] = 1.0  # T2f -> T1c
+    cross_modality_matrix[2, 1] = 1.0  # T2f -> T1n 
+    cross_modality_matrix[2, 3] = 1.0  # T2f -> T2w
+    # cross_modality_matrix[0, 1] = 1.0  # T2f -> T1c
+    # cross_modality_matrix[0, 2] = 1.0  # T2f -> T1n 
+    # cross_modality_matrix[0, 3] = 1.0  # T2f -> T2w
     
     # Initialize model
     print("Initializing model...")
