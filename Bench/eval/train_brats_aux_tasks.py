@@ -373,6 +373,13 @@ class VisionTrainingArguments:
     use_cls: bool = True
 
 
+def hard_iou(pred, tgt):
+    """pred & tgt shape  [B,4,Q]  –– binary {0,1}."""
+    intersection = (pred & tgt).sum(dim=2)         # [B,4]
+    union        = (pred | tgt).sum(dim=2) + 1e-7
+    return (intersection / union)                  # [B,4]
+
+
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
@@ -452,6 +459,7 @@ def main():
     # -----------------------------------------------------------
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
     best_val_loss = float('inf')
+    best_val_score = -float("inf")  # higher = better
     best_model_path = os.path.join(output_dir, "best_model.pt")
 
     # -----------------------------------------------------------
@@ -507,31 +515,88 @@ def main():
         satellite_val_loss = 0.0
         region_val_loss = 0.0
         model.eval()
+        running = {
+            "loss": 0.0,
+            "area_loss": 0.0, "shape_loss": 0.0,
+            "sat_loss": 0.0,  "reg_loss": 0.0,
+            # prediction buffers
+            "area_pred": [], "area_tgt": [],
+            "shape_pred": [], "shape_tgt": [],
+            "sat_pred": [],   "sat_tgt": [],
+            "iou_sum": 0.0,   "iou_cnt": 0
+        }
+
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Epoch {epoch+1} [Val]"):
-                mod1 = batch["t1c"].to(device)
-                mod2 = batch["t1n"].to(device)
-                mod3 = batch["t2f"].to(device)
-                mod4 = batch["t2w"].to(device)
+                mod1, mod2, mod3, mod4 = (
+                    batch["t1c"].to(device),
+                    batch["t1n"].to(device),
+                    batch["t2f"].to(device),
+                    batch["t2w"].to(device)
+                )
+                area_tgt = batch["area_targets"].to(device)
+                shape_tgt = batch["shape_targets"].to(device)
+                sat_tgt   = batch["satellite_targets"].to(device)
+                reg_tgt   = batch["region_targets"].to(device)
 
-                area_targets = batch["area_targets"].to(device)
-                shape_targets = batch["shape_targets"].to(device)
-                satellite_targets = batch["satellite_targets"].to(device)
-                region_targets = batch["region_targets"].to(device)
+                area_logits, shape_logits, sat_logits, reg_logits = model(
+                    mod1, mod2, mod3, mod4
+                )
 
-                area_logits, shape_logits, satellite_logits, region_logits = model(mod1, mod2, mod3, mod4)
-                loss, loss_dict = compute_aux_loss(
-                    area_logits, shape_logits, satellite_logits, region_logits,
-                    area_targets, shape_targets, satellite_targets, region_targets,
-                    K_area=8, K_shape=7, K_satellite=5, keep_only_region=args.keep_only_region,
+                # ------- loss
+                loss, ldict = compute_aux_loss(
+                    area_logits, shape_logits, sat_logits, reg_logits,
+                    area_tgt, shape_tgt, sat_tgt, reg_tgt,
+                    K_area=8, K_shape=7, K_satellite=5,
+                    keep_only_region=args.keep_only_region,
                     region_loss=args.region_loss
                 )
-                area_val_loss += loss_dict["area_loss"]
-                shape_val_loss += loss_dict["shape_loss"]
-                satellite_val_loss += loss_dict["satellite_loss"]
-                region_val_loss += loss_dict["region_loss"]
+                running["loss"]       += loss.item()
+                running["area_loss"]  += ldict["area_loss"]
+                running["shape_loss"] += ldict["shape_loss"]
+                running["sat_loss"]   += ldict["satellite_loss"]
+                running["reg_loss"]   += ldict["region_loss"]
 
-                val_loss += loss.item()
+                # ------- predictions
+                B = area_logits.size(0)
+
+                # area (ordinal) → MAE
+                area_pred = coral_predict(area_logits.view(B*4,7)).cpu()
+                running["area_pred"].append(area_pred)
+                running["area_tgt"].append(area_tgt.view(-1).cpu())
+
+                # shape / satellite → accuracy
+                shape_pred = ce_predict(shape_logits.view(B*4,7)).cpu()
+                sat_pred   = ce_predict(sat_logits.view(B*4,5)).cpu()
+                running["shape_pred"].append(shape_pred)
+                running["shape_tgt"].append(shape_tgt.view(-1).cpu())
+                running["sat_pred"].append(sat_pred)
+                running["sat_tgt"].append(sat_tgt.view(-1).cpu())
+
+                # IoU @ 0.5
+                reg_pred_bin = (torch.sigmoid(reg_logits) >= 0.5)
+                iou = hard_iou(reg_pred_bin.bool(), reg_tgt.bool())
+                running["iou_sum"] += iou.sum().item()
+                running["iou_cnt"] += iou.numel()
+
+        # -------- aggregate metrics
+        n_batches = len(val_loader)
+        val_losses = {k: running[k] / n_batches for k in
+                      ["loss", "area_loss", "shape_loss", "sat_loss", "reg_loss"]}
+
+        area_mae   = mean_absolute_error(
+                        torch.cat(running["area_tgt"]),
+                        torch.cat(running["area_pred"])
+                     )
+        shape_acc  = (torch.cat(running["shape_tgt"]) ==
+                      torch.cat(running["shape_pred"])).float().mean().item()
+        sat_acc    = (torch.cat(running["sat_tgt"]) ==
+                      torch.cat(running["sat_pred"])).float().mean().item()
+        mean_iou   = running["iou_sum"] / running["iou_cnt"]
+
+        # ------ combined “average score”
+        area_score = 1 - area_mae / 7.0          # 7 = max ordinal gap
+        val_score  = (area_score + shape_acc + sat_acc + mean_iou) / 4.0
 
         area_val_loss /= len(val_loader)
         shape_val_loss /= len(val_loader)
@@ -540,10 +605,18 @@ def main():
         val_loss /= len(val_loader)
         logger.info(f"Epoch {epoch+1} - Val Loss: {val_loss:.4f} - Area Loss: {area_val_loss:.4f} - Shape Loss: {shape_val_loss:.4f} - Satellite Loss: {satellite_val_loss:.4f} - Region Loss: {region_val_loss:.4f}")
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        logger.info(
+            f"Epoch {epoch+1} - ValLoss {val_losses['loss']:.4f} | "
+            f"MAE {area_mae:.3f} | ShapeAcc {shape_acc:.3f} | "
+            f"SatAcc {sat_acc:.3f} | IoU@0.5 {mean_iou:.3f} | "
+            f"AvgScore {val_score:.3f}"
+        )
+
+        # ----- save best on AvgScore
+        if val_score > best_val_score:
+            best_val_score = val_score
             torch.save(model.state_dict(), best_model_path)
-            logger.info(f"New best val loss = {val_loss:.4f}. Saved model to {best_model_path}")
+            logger.info(f"New best avg-score {val_score:.3f}  ➜  saved to {best_model_path}")
 
     logger.info("Training complete.")
 
