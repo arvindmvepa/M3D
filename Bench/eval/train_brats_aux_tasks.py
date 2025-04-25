@@ -107,6 +107,28 @@ def bce_loss(logits, labels):
     return loss_bce
 
 
+def dice_loss(logits, labels, eps: float = 1e-6):
+    """
+    Soft Dice loss for multi-label map of shape [B, L, Q]:
+      logits: raw predictions           (no sigmoid)
+      labels: binary {0,1} targets
+
+    Returns the average Dice loss over all Q channels.
+    """
+    # apply sigmoid to get probabilities
+    probs = torch.sigmoid(logits)
+
+    # sum over batch & sequence dims → per-channel totals
+    # probs, labels: [B, L, Q]
+    intersection = (probs * labels).sum(dim=(0, 1))  # [Q]
+    cardinality = probs.sum(dim=(0, 1)) + labels.sum(dim=(0, 1))  # [Q]
+
+    dice_score = (2. * intersection + eps) / (cardinality + eps)  # [Q]
+    dice_loss = 1. - dice_score  # [Q]
+
+    return dice_loss.mean()
+
+
 def ce_loss(logits, labels):
     loss_ce = F.cross_entropy(logits, labels)
     return loss_ce
@@ -135,6 +157,10 @@ def compute_aux_loss(
 
     if region_loss == "bce":
         region_loss = bce_loss(region_logits, region_targets)
+    elif region_loss == "dice":
+        region_loss = dice_loss(region_logits, region_targets)
+    elif region_loss == "bce_dice":
+        region_loss = bce_loss(region_logits, region_targets) + dice_loss(region_logits, region_targets)
     else:
         raise ValueError(f"Unknown bbox_loss: {region_loss}")
 
