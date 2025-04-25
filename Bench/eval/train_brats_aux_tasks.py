@@ -266,77 +266,115 @@ class VisionAuxClassifier(nn.Module):
     def __init__(
         self,
         vision_tower: nn.Module,
-        num_modalities=4,
-        area_levels=8,
-        shape_levels=7,
-        satellite_levels=5,
-        num_regions=11,
-        use_cls=False
+        num_modalities: int = 4,
+        area_levels: int = 8,
+        shape_levels: int = 7,
+        satellite_levels: int = 5,
+        num_regions: int = 11,
+        use_cls: bool = False,
+        projection_strategy: str = "shared",   #  ← NEW
     ):
         super().__init__()
+        assert projection_strategy in {"shared", "per_seq", "both"}
+        self.strategy = projection_strategy
+        self.use_cls  = use_cls
         self.vision_tower = vision_tower
-        self.use_cls = use_cls
+
+        # ---------------------------------------------
+        # Compute feature dimensionality
+        # ---------------------------------------------
         if self.use_cls:
-            cls_hidden_dim = 768 * num_modalities
-            non_cls_hidden_dim = 768 * num_modalities * 2048
-
-            self.area_head = nn.Linear(cls_hidden_dim, 4 * (area_levels - 1))
-            self.shape_head = nn.Linear(cls_hidden_dim, 4 * shape_levels)
-            self.satellite_head = nn.Linear(cls_hidden_dim, 4 * satellite_levels)
-            self.region_head = nn.Linear(non_cls_hidden_dim, 4 * num_regions)
+            self.cls_dim   = 768 * num_modalities
+            self.token_dim = 768 * num_modalities * 2048
         else:
-            hidden_dim = 768 * num_modalities * 2048
+            self.token_dim = 768 * num_modalities * 2048
 
-            # area => [B,4,(area_levels-1)]
-            self.area_head = nn.Linear(hidden_dim, 4 * (area_levels - 1))
-            self.shape_head = nn.Linear(hidden_dim, 4 * shape_levels)
-            self.satellite_head = nn.Linear(hidden_dim, 4 * satellite_levels)
-            self.region_head = nn.Linear(hidden_dim, 4 * num_regions)
+        # ---------------------------------------------
+        # Build heads
+        # ---------------------------------------------
+        def make_heads(levels, base_dim):
+            """
+            Helper that returns  ⓐ shared head,  ⓑ ModuleList of per-seq heads
+            depending on selected strategy.
+            """
+            shared = None
+            perseq = None
 
-        self.area_levels = area_levels
-        self.shape_levels = shape_levels
+            if self.strategy in {"shared", "both"}:
+                # single linear layer that predicts for *all* sequences
+                shared = nn.Linear(base_dim, 4 * levels)
+
+            if self.strategy in {"per_seq", "both"}:
+                # 4 independent heads – one per sequence
+                perseq = nn.ModuleList([
+                    nn.Linear(base_dim, levels) for _ in range(4)
+                ])
+
+            return shared, perseq
+
+        # area heads (CORAL ⇒ K-1 logits per level)
+        self.area_shared,    self.area_perseq    = make_heads(area_levels - 1,
+                                                              self.cls_dim if use_cls else self.token_dim)
+        # shape heads
+        self.shape_shared,   self.shape_perseq   = make_heads(shape_levels,
+                                                              self.cls_dim if use_cls else self.token_dim)
+        # satellite heads
+        self.satellite_shared, self.satellite_perseq = make_heads(satellite_levels,
+                                                                  self.cls_dim if use_cls else self.token_dim)
+        # region heads
+        self.region_shared,  self.region_perseq  = make_heads(num_regions,
+                                                              self.token_dim if use_cls else self.token_dim)
+
+        # store constants
+        self.area_levels     = area_levels
+        self.shape_levels    = shape_levels
         self.satellite_levels = satellite_levels
-        self.num_regions = num_regions
+        self.num_regions     = num_regions
 
+    # -------------------------------------------------
+    # forward
+    # -------------------------------------------------
     def forward(self, mod1, mod2, mod3, mod4):
         B = mod1.size(0)
 
-        # Extract features from each modality
-        feats1 = self.vision_tower.forward(mod1)
-        feats2 = self.vision_tower.forward(mod2)
-        feats3 = self.vision_tower.forward(mod3)
-        feats4 = self.vision_tower.forward(mod4)
+        # 1) get visual features
+        f1, f2, f3, f4 = (self.vision_tower.forward(x) for x in (mod1, mod2, mod3, mod4))
 
         if self.use_cls:
-            # Concatenate cls features and then non-cls features
-            cls_feats = torch.cat([feats1[:, 0], feats2[:, 0], feats3[:, 0], feats4[:, 0]], dim=1)
-            cls_feats = cls_feats.view(B, -1)  # [B, 768*4]
-            non_cls_feats = torch.cat([feats1[:, 1:], feats2[:, 1:], feats3[:, 1:], feats4[:, 1:]], dim=1)  # [B, 768*4]
-            non_cls_feats = non_cls_feats.view(B, -1)  # [B, 768*4*2048]
-            area_feats = cls_feats
-            shape_feats = cls_feats
-            satellite_feats = cls_feats
-            region_feats = non_cls_feats
+            # split CLS vs patch tokens
+            cls_feats  = torch.cat([f[:, 0]   for f in (f1, f2, f3, f4)], dim=1)  # [B, cls_dim]
+            patch_feats = torch.cat([f[:, 1:] for f in (f1, f2, f3, f4)], dim=1)  # [B, cls_dim, 2048]
+            patch_feats = patch_feats.view(B, -1)                                 # [B, token_dim]
+            area_feats = shape_feats = satellite_feats = cls_feats
+            region_feats = patch_feats
         else:
-            # Concatenate features from all modalities
-            feats = torch.cat([feats1, feats2, feats3, feats4], dim=1)  # [B, 768*4, 2048]
-            feats = feats.view(B, -1)
-            area_feats = feats
-            shape_feats = feats
-            satellite_feats = feats
-            region_feats = feats
-        # area
-        area_raw = self.area_head(area_feats)
-        area_logits = area_raw.view(B, 4, (self.area_levels - 1))
-        # shape
-        shape_raw = self.shape_head(shape_feats)
-        shape_logits = shape_raw.view(B, 4, self.shape_levels)
-        # satellite
-        satellite_raw = self.satellite_head(satellite_feats)
-        satellite_logits = satellite_raw.view(B, 4, self.satellite_levels)
-        # region
-        region_raw = self.region_head(region_feats)
-        region_logits = region_raw.view(B, 4, self.num_regions)
+            feats = torch.cat([f1, f2, f3, f4], dim=1).view(B, -1)                # [B, token_dim]
+            area_feats = shape_feats = satellite_feats = region_feats = feats
+
+        # 2) helper to compute logits
+        def project(shared_layer, perseq_layers, x, levels):
+            """
+            Returns tensor of shape [B, 4, levels]
+            according to chosen projection strategy.
+            """
+            out = 0
+            if shared_layer is not None:     # shared or both
+                out += shared_layer(x).view(B, 4, levels)
+            if perseq_layers is not None:    # per_seq or both
+                per_out = [head(x).view(B, 1, levels) for head in perseq_layers]
+                per_out = torch.cat(per_out, dim=1)   # [B,4,levels]
+                out = out + per_out if isinstance(out, torch.Tensor) else per_out
+            return out
+
+        # 3) compute logits
+        area_logits      = project(self.area_shared,      self.area_perseq,
+                                   area_feats,      self.area_levels - 1)
+        shape_logits     = project(self.shape_shared,     self.shape_perseq,
+                                   shape_feats,     self.shape_levels)
+        satellite_logits = project(self.satellite_shared, self.satellite_perseq,
+                                   satellite_feats, self.satellite_levels)
+        region_logits    = project(self.region_shared,    self.region_perseq,
+                                   region_feats,    self.num_regions)
 
         return area_logits, shape_logits, satellite_logits, region_logits
 
@@ -361,7 +399,10 @@ class VisionTrainingArguments:
     pretrain_vision_model: str = field(default="/local2/amvepa91/M3D/LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin",
                                        metadata={"help": "Path to pretrained model for ViT."})
     freeze_vision_tower: bool = field(default=True, metadata={"help": "Whether to freeze vision tower weights."})
-
+    projection_strategy: str = field(
+        default="shared",
+        metadata={"help": "Projection-head layout: 'shared' | 'per_seq' | 'both'"}
+    )
     batch_size: int = 4
     num_epochs: int = 50
     learning_rate: float = 1e-4
@@ -370,18 +411,18 @@ class VisionTrainingArguments:
     tag: str = ""
     keep_only_region: bool = False
     region_loss: str = "bce"
-    use_cls: bool = True
+    use_cls: bool = False
 
 
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_region_{args.keep_only_region}_region_loss_{args.region_loss}_use_cls_{args.use_cls}" + args.tag
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_region_{args.keep_only_region}_region_loss_{args.region_loss}_use_cls_{args.use_cls}_proj{args.projection_strategy}" + args.tag
     os.makedirs(output_dir, exist_ok=True)
     logger = setup_logger(
         log_file=os.path.join(output_dir,
-                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_region_{args.keep_only_region}_region_loss_{args.region_loss}_use_cls_{args.use_cls}.log"),
+                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_keep_only_region_{args.keep_only_region}_region_loss_{args.region_loss}_use_cls_{args.use_cls}_proj{args.projection_strategy}.log"),
         log_to_console=True
     )
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -431,7 +472,8 @@ def main():
         shape_levels=7,
         satellite_levels=5,
         num_regions=11,
-        use_cls=args.use_cls
+        use_cls=args.use_cls,
+        projection_strategy=args.projection_strategy,  # ← NEW
     ).to(device)
 
     # -----------------------------------------------------------
