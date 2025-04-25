@@ -728,8 +728,7 @@ def main():
     logger.info(f"Area MAE:     {area_mae:.4f}")
     logger.info(f"Shape Acc:   {shape_acc:.4f}")
     logger.info(f"Satellite Acc: {satellite_acc:.4f}")
-    logger.info(f"@0.50 Mean IoU: {np.mean([thresh_mean_iou[label_index][0.5] 
-                                            for label_index in range(4)]):.4f}")
+    logger.info(f"@0.50 Mean IoU: {np.mean([thresh_mean_iou[label_index][0.5] for label_index in range(4)]):.4f}")
     logger.info("Evaluation complete.")
 
 
