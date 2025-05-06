@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # run "accelerate config" first!
-output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000
+output_dir=./LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-new-dataset-0000
 accelerate launch --gpu_ids $1 --main_process_port 29600 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \
-    --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_v3.json \
-    --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_v3.json \
-    --vqa_data_test_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v3.json \
+    --vqa_data_train_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_updated_v2_seed0_multitask_fixed.json \
+    --vqa_data_val_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_updated_v2_seed0_multitask_fixed.json \
+    --vqa_data_test_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_updated_v2_seed0_multitask_fixed.json \
     --lora_enable True \
     --vision_tower vit3d \
     --pretrain_vision_model /local2/amvepa91/M3D/LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
@@ -43,6 +43,6 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES="" python LaMed/src/utils/merge_lora_weights_a
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --model_name_or_path "$output_dir"/hf \
---vqa_data_test_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_v2.json \
+--vqa_data_test_path /local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_updated_v2_seed0_multitask_fixed.json \
 --output_dir $output_dir/eval_vqa/
 
