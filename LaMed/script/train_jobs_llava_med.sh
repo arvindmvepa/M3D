@@ -5,7 +5,7 @@ output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-
 train_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_updated_v2_seed0_multitask_fixed.json
 val_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_updated_v2_seed0_multitask_fixed.json
 test_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_updated_v2_seed0_multitask_fixed.json
-accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
+accelerate launch --gpu_ids $1 --main_process_port 29601 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
     --model_type phi3 \
