@@ -38,6 +38,7 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --logging_steps 0.001 \
     --gradient_checkpointing False \
     --proj_pooling_size 1 \
+    --model_max_length 8448 \
     --dataloader_pin_memory True\
     --dataloader_num_workers 8 \
     --report_to tensorboard
@@ -93,6 +94,7 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --logging_steps 0.001 \
     --gradient_checkpointing False \
     --proj_pooling_size 1 \
+    --model_max_length 8448 \
     --dataloader_pin_memory True\
     --dataloader_num_workers 8 \
     --report_to tensorboard
@@ -147,6 +149,7 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --lr_scheduler_type "cosine" \
     --logging_steps 0.001 \
     --proj_pooling_size 1 \
+    --model_max_length 8448 \
     --gradient_checkpointing False \
     --dataloader_pin_memory True\
     --dataloader_num_workers 8 \
