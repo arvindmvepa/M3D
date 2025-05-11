@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # run "accelerate config" first!
-output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-new-dataset-0000
+output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-again-new-dataset-0000
 train_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_updated_v2_seed0_multitask_fixed.json
 val_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_updated_v2_seed0_multitask_fixed.json
 test_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_updated_v2_seed0_multitask_fixed.json
@@ -21,13 +21,13 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --pretrain_vision_model ./LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
     --bf16 True \
     --output_dir $output_dir \
-    --num_train_epochs 5 \
+    --num_train_epochs 3 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --evaluation_strategy "steps" \
     --eval_accumulation_steps 1 \
-    --eval_steps 0.04 \
+    --eval_steps 0.5 \
     --save_strategy "steps" \
     --save_steps 1000 \
     --save_total_limit 1 \
@@ -75,13 +75,13 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --pretrain_vision_model ./LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
     --bf16 True \
     --output_dir $output_dir \
-    --num_train_epochs 5 \
+    --num_train_epochs 3 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --evaluation_strategy "steps" \
     --eval_accumulation_steps 1 \
-    --eval_steps 0.04 \
+    --eval_steps 0.5 \
     --save_strategy "steps" \
     --save_steps 1000 \
     --save_total_limit 1 \
@@ -129,13 +129,13 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --pretrain_vision_model ./LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
     --bf16 True \
     --output_dir $output_dir \
-    --num_train_epochs 5 \
+    --num_train_epochs 3 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --evaluation_strategy "steps" \
     --eval_accumulation_steps 1 \
-    --eval_steps 0.04 \
+    --eval_steps 0.5 \
     --save_strategy "steps" \
     --save_steps 1000 \
     --save_total_limit 1 \
