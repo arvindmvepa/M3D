@@ -50,7 +50,7 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES="" python LaMed/src/utils/merge_lora_weights_a
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --model_name_or_path "$output_dir"/hf \
---output_dir $output_dir \
+--output_dir $output_dir/eval_vqa \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
@@ -107,7 +107,7 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES="" python LaMed/src/utils/merge_lora_weights_a
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --model_name_or_path "$output_dir"/hf \
---output_dir $output_dir \
+--output_dir $output_dir/eval_vqa \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
@@ -164,7 +164,7 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES="" python LaMed/src/utils/merge_lora_weights_a
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --model_name_or_path "$output_dir"/hf \
---output_dir $output_dir \
+--output_dir $output_dir/eval_vqa \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
