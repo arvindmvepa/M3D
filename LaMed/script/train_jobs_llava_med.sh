@@ -54,7 +54,7 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
---output_dir $output_dir \
+--output_dir $output_dir/eval_vqa \
 --gt_file $test_path \
 
 # run "accelerate config" first!
@@ -111,7 +111,7 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
---output_dir $output_dir \
+--output_dir $output_dir/eval_vqa \
 --gt_file $test_path \
 
 # run "accelerate config" first!
@@ -168,6 +168,6 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
---output_dir $output_dir \
+--output_dir $output_dir/eval_vqa \
 --gt_file $test_path \
 
