@@ -120,6 +120,7 @@ def main():
         os.makedirs(args.output_dir)
 
     output_path = os.path.join(args.output_dir, "eval_open_vqa.csv")
+    print(f"Output path: {output_path}")
     with open(output_path, mode='w') as outfile:
         writer = csv.writer(outfile)
         writer.writerow(["Question Type", "Question", "Answer", "Pred", "accuracy", "bleu", "rouge1", "meteor", "bert_f1"])
