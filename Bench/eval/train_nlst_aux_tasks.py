@@ -188,6 +188,81 @@ def get_npy_path(volume_path, img_root="/local/amvepa91/nlst_npy"):
 def ce_loss(logits, labels):
     return F.cross_entropy(logits, labels.long())
 
+def argmax_ignore_nan(logits: torch.Tensor):
+    """[B,L,C] -> [B,L] int64; logits can be float32/16."""
+    return torch.argmax(logits, dim=-1)
+
+@torch.no_grad()
+def accuracy(pred: torch.Tensor, tgt: torch.Tensor):
+    """Both [N] int64; returns float in [0,1]."""
+    valid = torch.isfinite(tgt)
+    if valid.sum() == 0:     # no valid labels
+        return 0.0
+    return (pred[valid] == tgt[valid]).float().mean().item()
+
+# ----------------------------------------------------------------------
+#  gather labels over a dataset to build majority / mean baselines
+# ----------------------------------------------------------------------
+def collect_labels(loader, device):
+    """
+    Returns dict task -> list[torch.Tensor]  (concatenated over dataset)
+    Each list entry is 1-D.
+    """
+    store = collections.defaultdict(list)
+    for batch in tqdm(loader, desc="[collect]", leave=False):
+        for k, v in batch["label_dict"].items():
+            store[k].append(v.flatten().to(device))
+    return {k: torch.cat(v) for k, v in store.items()}
+
+def build_baseline(train_labels):
+    """
+    From the collected train labels compute
+      * majority class for categorical tasks
+      * mean   value  for regression tasks
+    Returns two dicts.
+    """
+    majority = {}
+    mean_val = {}
+    for k, v in train_labels.items():
+        if "diameter" in k:                  # regression task
+            val = v[torch.isfinite(v)].float()
+            mean_val[k] = val.mean().item() if val.numel() else 0.0
+        else:                                # categorical
+            vals = v[torch.isfinite(v)].long()
+            mode = torch.mode(vals, keepdim=False).values.item() if vals.numel() else 0
+            majority[k] = mode
+    return majority, mean_val
+
+@torch.no_grad()
+def eval_baseline(loader, majority, mean_val, device):
+    """
+    Evaluate the constant predictors on a dataloader; returns dict of metrics.
+    """
+    tot_correct = collections.defaultdict(int)
+    tot_counts  = collections.defaultdict(int)
+    mse_sum     = collections.defaultdict(float)
+
+    for batch in loader:
+        for k, tgt in batch["label_dict"].items():
+            tgt = tgt.to(device).flatten()
+            if "diameter" in k:
+                pred = torch.full_like(tgt, mean_val[k], dtype=torch.float)
+                mse_sum[k] += ((pred - tgt) ** 2)[torch.isfinite(tgt)].sum().item()
+                tot_counts[k] += torch.isfinite(tgt).sum().item()
+            else:
+                pred = torch.full_like(tgt, majority[k], dtype=torch.long)
+                mask = torch.isfinite(tgt)
+                tot_correct[k] += (pred[mask] == tgt[mask]).sum().item()
+                tot_counts[k]  += mask.sum().item()
+
+    out = {}
+    for k in tot_counts:
+        if "diameter" in k:
+            out[k + "_mse"] = mse_sum[k] / max(1, tot_counts[k])
+        else:
+            out[k + "_acc"] = tot_correct[k] / max(1, tot_counts[k])
+    return out
+
 
 def mse_ignore_nan(pred: torch.Tensor,
                    target: torch.Tensor,
@@ -598,6 +673,60 @@ class VisionTrainingArguments:
     use_cls: bool = True
 
 
+def _masked_acc(pred, tgt):
+    mask = torch.isfinite(tgt)
+    if mask.sum() == 0:
+        return 0.0
+    return (pred[mask] == tgt[mask]).float().mean().item()
+
+def _masked_mse(pred, tgt):
+    mask = torch.isfinite(tgt)
+    if mask.sum() == 0:
+        return 0.0
+    return ((pred[mask] - tgt[mask]) ** 2).mean().item()
+
+@torch.no_grad()
+def evaluate(loader, model, device):
+    model.eval()
+    agg = collections.defaultdict(float)   # metric accumulators
+    cnt = collections.defaultdict(int)
+
+    for batch in loader:
+        img   = batch["image"].to(device)
+        label = {k: v.to(device) for k, v in batch["label_dict"].items()}
+        out   = model(img)
+
+        # categorical heads -------------------------------------------------
+        for key_pred, key_tgt in [
+            ("abnormality_type_logits",   "abnormality_type_labels"),
+            ("preexist_logits",           "preexist_labels"),
+            ("location_logits",           "location_labels"),
+            ("interval_change_logits",    "interval_change_labels"),
+            ("interval_growth_logits",    "interval_growth_labels"),
+            ("further_investigation_logits", "further_investigation_labels"),
+            ("margins_logits",            "margins_labels"),
+            ("pre_att_logits",            "pre_att_labels"),
+        ]:
+            p = torch.argmax(out[key_pred], -1).flatten()
+            t = label[key_tgt].long().flatten()
+            agg[key_pred.replace("_logits", "_acc")] += _masked_acc(p, t) * len(p)
+            cnt[key_pred.replace("_logits", "_acc")] += len(p)
+
+        # regression heads --------------------------------------------------
+        pred_diam  = out["longest_diameter_reg_logits"].flatten()
+        tgt_diam   = label["longest_diameter_labels"].flatten()
+        agg["longest_diameter_mse"] += _masked_mse(pred_diam, tgt_diam) * len(pred_diam)
+        cnt["longest_diameter_mse"] += len(pred_diam)
+
+        pred_perp = out["longest_perp_diameter_reg_logits"].flatten()
+        tgt_perp  = label["longest_perp_diameter_labels"].flatten()
+        agg["longest_perp_diameter_mse"] += _masked_mse(pred_perp, tgt_perp) * len(pred_perp)
+        cnt["longest_perp_diameter_mse"] += len(pred_perp)
+
+    # average over dataset
+    return {k: agg[k] / max(1, cnt[k]) for k in agg}
+
+
 def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
@@ -662,6 +791,19 @@ def main():
     val_loader = DataLoader(val_dataset,   batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset,  batch_size=args.batch_size, shuffle=False)
 
+    train_lbls = collect_labels(train_loader, device)
+    majority_cls, mean_reg = build_baseline(train_lbls)
+
+    logger.info("Majority / mean computed from train set:")
+    logger.info(str({**majority_cls, **mean_reg}))
+
+    logger.info("Baseline on train:")
+    logger.info(str(eval_baseline(train_loader, majority_cls, mean_reg, device)))
+    logger.info("Baseline on val:")
+    logger.info(str(eval_baseline(val_loader, majority_cls, mean_reg, device)))
+    logger.info("Baseline on test:")
+    logger.info(str(eval_baseline(test_loader, majority_cls, mean_reg, device)))
+
     logger.info(f"Dataset sizes => train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
 
     # -----------------------------------------------------------
@@ -717,10 +859,12 @@ def main():
                     val_comp_sums[k] += v
 
         avg_val_loss = val_total_loss / len(val_loader)
+        val_metrics = evaluate(val_loader, model, device)
         val_comp_means = {k: v / len(val_loader) for k, v in val_comp_sums.items()}
 
         logger.info(f"[Epoch {epoch + 1}]  Val loss = {avg_val_loss:.5f} " +
-                    " ".join([f"{k}={v:.4f}" for k, v in val_comp_means.items()]))
+                    " ".join([f"{k}={v:.4f}" for k, v in val_comp_means.items()])
+                    + " ".join([f"{k}={v:.4f}" for k, v in val_metrics.items()]))
 
         # ------------- save best checkpoint ------------------- #
         if avg_val_loss < best_val_loss:
@@ -753,9 +897,11 @@ def main():
 
     avg_test_loss = test_total_loss / len(test_loader)
     test_comp_means = {k: v / len(test_loader) for k, v in test_comp_sums.items()}
+    test_metrics = evaluate(test_loader, model, device)
 
     logger.info(f"Best-val model Test loss = {avg_test_loss:.5f} " +
-                " ".join([f"{k}={v:.4f}" for k, v in test_comp_means.items()]))
+                " ".join([f"{k}={v:.4f}" for k, v in test_comp_means.items()])
+                + " ".join([f"{k}={v:.4f}" for k, v in test_metrics.items()]))
 
 
 if __name__ == "__main__":
