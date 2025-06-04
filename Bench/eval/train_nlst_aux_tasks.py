@@ -481,27 +481,27 @@ class VisionAuxClassifier(nn.Module):
             cls_hidden_dim = 768
             non_cls_hidden_dim = 768 * 2048
 
-            self.abnormality_type_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(self.abnormality_type_map))
-            self.location_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(self.location_map))
-            self.margins_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(self.margins_map))
-            self.pre_att_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(self.pre_att_map))
-            self.interval_change_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(self.interval_change_map))
-            self.interval_growth_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(self.interval_growth_map))
-            self.further_investigation_head = nn.Linear(cls_hidden_dim, len(self.labels_order) * len(self.further_investigation_map))
-            self.preexist_head = nn.Linear(cls_hidden_dim, len(self.labels_order) * len(self.ab_preexist_map))
+            self.abnormality_type_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(abnormality_type_map))
+            self.location_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(location_map))
+            self.margins_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(margins_map))
+            self.pre_att_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(pre_att_map))
+            self.interval_change_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(interval_change_map))
+            self.interval_growth_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(interval_growth_map))
+            self.further_investigation_head = nn.Linear(cls_hidden_dim, len(self.labels_order) * len(further_investigation_map))
+            self.preexist_head = nn.Linear(cls_hidden_dim, len(self.labels_order) * len(ab_preexist_map))
             self.longest_diameter_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order))
             self.longest_perpendicular_diameter_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order))
         else:
             hidden_dim = 768 * 2048
 
-            self.abnormality_type_head = nn.Linear(hidden_dim, len(self.labels_order) * len(self.abnormality_type_map))
-            self.location_head = nn.Linear(hidden_dim, len(self.labels_order) * len(self.location_map))
-            self.margins_head = nn.Linear(hidden_dim, len(self.labels_order) * len(self.margins_map))
-            self.pre_att_head = nn.Linear(hidden_dim, len(self.labels_order) * len(self.pre_att_map))
-            self.interval_change_head = nn.Linear(hidden_dim, len(self.labels_order) * len(self.interval_change_map))
-            self.interval_growth_head = nn.Linear(hidden_dim, len(self.labels_order) * len(self.interval_growth_map))
-            self.further_investigation_head = nn.Linear(hidden_dim, len(self.labels_order) * len(self.further_investigation_map))
-            self.preexist_head = nn.Linear(hidden_dim, len(self.labels_order) * len(self.ab_preexist_map))
+            self.abnormality_type_head = nn.Linear(hidden_dim, len(self.labels_order) * len(abnormality_type_map))
+            self.location_head = nn.Linear(hidden_dim, len(self.labels_order) * len(location_map))
+            self.margins_head = nn.Linear(hidden_dim, len(self.labels_order) * len(margins_map))
+            self.pre_att_head = nn.Linear(hidden_dim, len(self.labels_order) * len(pre_att_map))
+            self.interval_change_head = nn.Linear(hidden_dim, len(self.labels_order) * len(interval_change_map))
+            self.interval_growth_head = nn.Linear(hidden_dim, len(self.labels_order) * len(interval_growth_map))
+            self.further_investigation_head = nn.Linear(hidden_dim, len(self.labels_order) * len(further_investigation_map))
+            self.preexist_head = nn.Linear(hidden_dim, len(self.labels_order) * len(ab_preexist_map))
             self.longest_diameter_head = nn.Linear(hidden_dim, len(self.labels_order))
             self.longest_perpendicular_diameter_head = nn.Linear(hidden_dim, len(self.labels_order))
 
@@ -544,20 +544,20 @@ class VisionAuxClassifier(nn.Module):
 
         abnormality_type_logits = (self.abnormality_type_head(abnormality_type_feats).view(B,
                                                                                            len(self.labels_order),
-                                                                                           len(self.abnormality_type_map)))
-        location_logits = (self.location_head(location_feats).view(B, len(self.labels_order), len(self.location_map)))
-        margins_logits = (self.margins_head(margins_feats).view(B, len(self.labels_order), len(self.margins_map)))
-        pre_att_logits = (self.pre_att_head(pre_att_feats).view(B, len(self.labels_order), len(self.pre_att_map)))
+                                                                                           len(abnormality_type_map)))
+        location_logits = (self.location_head(location_feats).view(B, len(self.labels_order), len(location_map)))
+        margins_logits = (self.margins_head(margins_feats).view(B, len(self.labels_order), len(margins_map)))
+        pre_att_logits = (self.pre_att_head(pre_att_feats).view(B, len(self.labels_order), len(pre_att_map)))
         interval_change_logits = (self.interval_change_head(interval_change_feats).view(B,
                                                                                         len(self.labels_order),
-                                                                                        len(self.interval_change_map)))
+                                                                                        len(interval_change_map)))
         interval_growth_logits = (self.interval_growth_head(interval_growth_feats).view(B,
                                                                                         len(self.labels_order),
-                                                                                        len(self.interval_growth_map)))
+                                                                                        len(interval_growth_map)))
         further_investigation_logits = (self.further_investigation_head(further_investigation_feats).view(B,
                                                                                                           len(self.labels_order),
-                                                                                                          len(self.further_investigation_map)))
-        preexist_logits = (self.preexist_head(preexist_feats).view(B, len(self.labels_order), len(self.ab_preexist_map)))
+                                                                                                          len(further_investigation_map)))
+        preexist_logits = (self.preexist_head(preexist_feats).view(B, len(self.labels_order), len(ab_preexist_map)))
         longest_diameter_reg_logits = self.longest_diameter_head(longest_diameter_feats).view(B, len(self.labels_order))
         longest_perp_diameter_reg_logits = self.longest_perpendicular_diameter_head(longest_perpendicular_diameter_feats).view(B, len(self.labels_order))
 
