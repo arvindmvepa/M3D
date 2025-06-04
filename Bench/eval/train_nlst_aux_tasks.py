@@ -288,6 +288,7 @@ class AuxVisionDataset(Dataset):
         self.transform = transform
 
         self.labels_order = labels_order
+        print(f"Labels order: {len(self.labels_order)}")
         self.abnormality_type_0_index = 0
         self.abnormality_type_1_start_index = 1
         self.abnormality_type_1_end_index = 5
