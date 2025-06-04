@@ -185,35 +185,33 @@ def get_npy_path(volume_path, img_root="/local/amvepa91/nlst_npy"):
     return volume_path_npy
 
 
-def ce_predict(logits):
-    probs = torch.softmax(logits, dim=1)  # => [N, (K-1)]
-    preds = torch.argmax(probs, dim=1)  # => [N]
-    return preds
-
-
-def mse_loss(logits, labels):
-    """
-    Builds a multi-hot [B, L, 27] then does MSE between
-    sigmoid(logits) and the labels. Returns a scalar.
-    """
-    B, L, Q = logits.shape
-    if Q != 27:
-        raise ValueError(f"Expected 27 quadrants, got Q={Q}.")
-    B_, L_, Q_ = labels.shape
-    if Q_ != 27:
-        raise ValueError(f"(labels) Expected 27 quadrants, got Q={Q_}.")
-
-    # Convert logits -> probabilities
-    probs = torch.sigmoid(logits)  # shape [B, L, 27]
-
-    # Compute standard MSE
-    loss_mse = F.mse_loss(probs, labels)
-    return loss_mse
-
-
 def ce_loss(logits, labels):
-    loss_ce = F.cross_entropy(logits, labels)
-    return loss_ce
+    return F.cross_entropy(logits, labels.long())
+
+
+def mse_ignore_nan(pred: torch.Tensor,
+                   target: torch.Tensor,
+                   reduction: str = "mean") -> torch.Tensor:
+    """
+    pred   : arbitrary shape, float
+    target : same shape as pred, may contain NaNs
+    reduction : "mean" | "sum" | "none"
+    Returns 0 (if every element is NaN) so the rest of the loss can still back-prop.
+    """
+    mask = torch.isfinite(target)          # False where NaN or ±Inf
+    if reduction == "none":
+        out = (pred - target).pow(2)
+        out[~mask] = 0.0                   # keep shape, zero-out ignored slots
+        return out
+
+    if mask.sum() == 0:                    # all targets are invalid
+        return torch.tensor(0.0,
+                            device=pred.device,
+                            dtype=pred.dtype,
+                            requires_grad=pred.requires_grad)
+
+    diff2 = (pred[mask] - target[mask]).pow(2)
+    return diff2.mean() if reduction == "mean" else diff2.sum()
 
 
 def compute_aux_loss(abnormality_type_logits, preexist_logits, interval_change_logits, interval_growth_logits,
@@ -259,11 +257,11 @@ def compute_aux_loss(abnormality_type_logits, preexist_logits, interval_change_l
 
     longest_diameter_reg_2d = longest_diameter_reg_logits.view(B * num_labels)
     longest_diameter_tgt_1d = longest_diameter_labels.view(B * num_labels)
-    longest_diameter_loss = F.mse_loss(longest_diameter_reg_2d, longest_diameter_tgt_1d)
+    longest_diameter_loss = mse_ignore_nan(longest_diameter_reg_2d, longest_diameter_tgt_1d)
 
     longest_perp_diameter_reg_2d = longest_perp_diameter_reg_logits.view(B * num_labels)
     longest_perp_diameter_tgt_1d = longest_perp_diameter_labels.view(B * num_labels)
-    longest_perp_diameter_loss = F.mse_loss(longest_perp_diameter_reg_2d, longest_perp_diameter_tgt_1d)
+    longest_perp_diameter_loss = mse_ignore_nan(longest_perp_diameter_reg_2d, longest_perp_diameter_tgt_1d)
 
     total_loss = abnormality_type_loss + preexist_loss + location_loss + interval_change_loss + interval_growth_loss + \
         further_investigation_loss + margins_loss + pre_att_loss
