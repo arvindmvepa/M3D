@@ -369,6 +369,7 @@ class AuxVisionDataset(Dataset):
         for datum_dict in self.data_list:
             self.samples.append({
                 "img_files": datum_dict["img_files"],
+                "filters": datum_dict["filters"],
                 "content_info": datum_dict["content_info"]
             })
 
