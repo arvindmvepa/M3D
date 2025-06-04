@@ -518,16 +518,16 @@ class VisionAuxClassifier(nn.Module):
             non_cls_feats = feats[:, 1:]
             non_cls_feats = non_cls_feats.view(B, -1)
             # model features
-            abnormality_type_feats = cls_feats
-            location_feats = cls_feats
-            margins_feats = cls_feats
-            pre_att_feats = cls_feats
-            interval_change_feats = non_cls_feats
-            interval_growth_feats = cls_feats
-            further_investigation_feats = non_cls_feats
-            preexist_feats = cls_feats
-            longest_diameter_feats = cls_feats
-            longest_perpendicular_diameter_feats = cls_feats
+            abnormality_type_feats = non_cls_feats
+            location_feats = non_cls_feats
+            margins_feats = non_cls_feats
+            pre_att_feats = non_cls_feats
+            interval_change_feats = cls_feats
+            interval_growth_feats = non_cls_feats
+            further_investigation_feats = cls_feats
+            preexist_feats = non_cls_feats
+            longest_diameter_feats = non_cls_feats
+            longest_perpendicular_diameter_feats = non_cls_feats
         else:
             feats = feats.view(B, -1)
             # model features
