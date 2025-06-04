@@ -658,9 +658,9 @@ def main():
     # -----------------------------------------------------------
     # 2) Build Datasets / Dataloaders
     # -----------------------------------------------------------
-    train_dataset = AuxVisionDataset(train_file, mode="train", num_regions=11)
-    val_dataset = AuxVisionDataset(val_file, mode="val", num_regions=11)
-    test_dataset = AuxVisionDataset(test_file, mode="test", num_regions=11)
+    train_dataset = AuxVisionDataset(train_file, mode="train")
+    val_dataset = AuxVisionDataset(val_file, mode="val")
+    test_dataset = AuxVisionDataset(test_file, mode="test")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset,   batch_size=args.batch_size, shuffle=False)
