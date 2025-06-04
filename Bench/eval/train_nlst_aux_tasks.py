@@ -24,7 +24,7 @@ from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCa
 
 
 labels_order = [
-            "NA"
+            "NA",
             "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
             "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
             "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
@@ -288,7 +288,6 @@ class AuxVisionDataset(Dataset):
         self.transform = transform
 
         self.labels_order = labels_order
-        print(f"Labels order: {len(self.labels_order)}")
         self.abnormality_type_0_index = 0
         self.abnormality_type_1_start_index = 1
         self.abnormality_type_1_end_index = 5
