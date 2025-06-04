@@ -177,27 +177,6 @@ _RULES = [
 ]
 
 
-def _priority(kernel) -> int:
-    """Return an integer priority; lower = better for lung work."""
-    for rank, pattern in _RULES:
-        if pattern.search(kernel):
-            return rank
-    return 9  # should never hit because last rule is '.*'
-
-
-def best_filter_index(filters) -> int:
-    """
-    Given a list of convolution-kernel strings, return the index
-    (0-based) of the kernel most suitable for lung-nodule evaluation.
-    If several share the same priority, the first in the list wins.
-    """
-    if not filters:
-        raise ValueError("Empty filter list")
-
-    priorities = [_priority(k) for k in filters]
-    return priorities.index(min(priorities))
-
-
 def get_npy_path(volume_path, img_root="/local/amvepa91/nlst_npy"):
     volume_name = os.path.basename(volume_path)
     time_point_dir = os.path.basename(os.path.dirname(volume_path))
@@ -398,7 +377,7 @@ class AuxVisionDataset(Dataset):
         # load img information
         img_files = data["img_files"]
         filters = data["filters"]
-        best_filter_index = best_filter_index(filters)
+        best_filter_index = self.best_filter_index(filters)
         img_file = img_files[best_filter_index]
         img_file_npy = get_npy_path(img_file)
 
@@ -467,6 +446,25 @@ class AuxVisionDataset(Dataset):
         image_file = os.path.basename(image_abs_path)
         new_image_abs_path = os.path.join(new_base_dir, volume_dir, image_file + ".npy")
         return new_image_abs_path
+
+    def _priority(self, kernel) -> int:
+        """Return an integer priority; lower = better for lung work."""
+        for rank, pattern in _RULES:
+            if pattern.search(kernel):
+                return rank
+        return 9  # should never hit because last rule is '.*'
+
+    def best_filter_index(self, filters) -> int:
+        """
+        Given a list of convolution-kernel strings, return the index
+        (0-based) of the kernel most suitable for lung-nodule evaluation.
+        If several share the same priority, the first in the list wins.
+        """
+        if not filters:
+            raise ValueError("Empty filter list")
+
+        priorities = [self._priority(k) for k in filters]
+        return priorities.index(min(priorities))
 
 
 class VisionAuxClassifier(nn.Module):
