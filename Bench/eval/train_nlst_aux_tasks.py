@@ -204,63 +204,52 @@ def accuracy(pred: torch.Tensor, tgt: torch.Tensor):
 #  gather labels over a dataset to build majority / mean baselines
 # ----------------------------------------------------------------------
 def collect_labels(loader, device):
-    """
-    Returns dict task -> list[torch.Tensor]  (concatenated over dataset)
-    Each list entry is 1-D.
-    """
     store = collections.defaultdict(list)
     for batch in tqdm(loader, desc="[collect]", leave=False):
-        for k, v in batch["label_dict"].items():
-            store[k].append(v.flatten().to(device))
-    return {k: torch.cat(v) for k, v in store.items()}
+        for k, v in batch["label_dict"].items():           # v: [B, L]
+            store[k].append(v.to(device))
+    return {k: torch.cat(v, dim=0) for k, v in store.items()}
 
 def build_baseline(train_labels):
-    """
-    From the collected train labels compute
-      * majority class for categorical tasks
-      * mean   value  for regression tasks
-    Returns two dicts.
-    """
-    majority = {}
-    mean_val = {}
-    for k, v in train_labels.items():
-        if "diameter" in k:                  # regression task
-            val = v[torch.isfinite(v)].float()
-            mean_val[k] = val.mean().item() if val.numel() else 0.0
-        else:                                # categorical
-            vals = v[torch.isfinite(v)].long()
-            mode = torch.mode(vals, keepdim=False).values.item() if vals.numel() else 0
-            majority[k] = mode
+    majority, mean_val = {}, {}
+    for k, mat in train_labels.items():       # mat: [N, L]
+        if "diameter" in k:                   # regression head
+            # ignore NaNs when taking mean
+            mask = torch.isfinite(mat)
+            mean = torch.where(mask, mat, torch.tensor(0., device=mat.device))
+            mean_val[k] = (mean.sum(0) / mask.float().sum(0).clamp(min=1)).cpu()   # [L]
+        else:                                 # classification head
+            modes = []
+            for l in range(mat.size(1)):      # per-label majority
+                col = mat[:, l][torch.isfinite(mat[:, l])]
+                mode = torch.mode(col.long(), keepdim=False).values.item() if col.numel() else 0
+                modes.append(mode)
+            majority[k] = torch.tensor(modes, device="cpu")                       # [L]
     return majority, mean_val
+
 
 @torch.no_grad()
 def eval_baseline(loader, majority, mean_val, device):
-    """
-    Evaluate the constant predictors on a dataloader; returns dict of metrics.
-    """
-    tot_correct = collections.defaultdict(int)
-    tot_counts  = collections.defaultdict(int)
-    mse_sum     = collections.defaultdict(float)
+    agg, cnt = collections.defaultdict(float), collections.defaultdict(int)
 
     for batch in loader:
-        for k, tgt in batch["label_dict"].items():
-            tgt = tgt.to(device).flatten()
+        for k, tgt in batch["label_dict"].items():         # tgt: [B, L]
+            tgt = tgt.to(device)
             if "diameter" in k:
-                pred = torch.full_like(tgt, mean_val[k], dtype=torch.float)
-                mse_sum[k] += ((pred - tgt) ** 2)[torch.isfinite(tgt)].sum().item()
-                tot_counts[k] += torch.isfinite(tgt).sum().item()
-            else:
-                pred = torch.full_like(tgt, majority[k], dtype=torch.long)
+                pred = mean_val[k].to(device).unsqueeze(0).expand_as(tgt)  # [B,L]
                 mask = torch.isfinite(tgt)
-                tot_correct[k] += (pred[mask] == tgt[mask]).sum().item()
-                tot_counts[k]  += mask.sum().item()
+                agg[k] += ((pred - tgt)[mask] ** 2).sum().item()
+                cnt[k] += mask.sum().item()
+            else:
+                pred = majority[k].to(device).unsqueeze(0).expand_as(tgt)  # [B,L]
+                mask = torch.isfinite(tgt)
+                agg[k] += (pred[mask] == tgt.long()[mask]).sum().item()
+                cnt[k] += mask.sum().item()
 
     out = {}
-    for k in tot_counts:
-        if "diameter" in k:
-            out[k + "_mse"] = mse_sum[k] / max(1, tot_counts[k])
-        else:
-            out[k + "_acc"] = tot_correct[k] / max(1, tot_counts[k])
+    for k in agg:
+        metric_name = k.replace("_labels", "") + ("_mse" if "diameter" in k else "_acc")
+        out[metric_name] = agg[k] / max(1, cnt[k])
     return out
 
 
