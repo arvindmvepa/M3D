@@ -522,10 +522,10 @@ class VisionAuxClassifier(nn.Module):
             location_feats = non_cls_feats
             margins_feats = non_cls_feats
             pre_att_feats = non_cls_feats
-            interval_change_feats = cls_feats
+            interval_change_feats = non_cls_feats
             interval_growth_feats = non_cls_feats
             further_investigation_feats = cls_feats
-            preexist_feats = non_cls_feats
+            preexist_feats = cls_feats
             longest_diameter_feats = non_cls_feats
             longest_perpendicular_diameter_feats = non_cls_feats
         else:
@@ -542,9 +542,7 @@ class VisionAuxClassifier(nn.Module):
             longest_diameter_feats = feats
             longest_perpendicular_diameter_feats = feats
 
-        print(f"abnormality_type_feats shape: {abnormality_type_feats.shape}")
-        abnormality_type_logits = self.abnormality_type_head(abnormality_type_feats)
-        abnormality_type_logits = abnormality_type_logits.view(B, len(self.labels_order), len(abnormality_type_map))
+        abnormality_type_logits = self.abnormality_type_head(abnormality_type_feats).view(B, len(self.labels_order), len(abnormality_type_map))
         location_logits = (self.location_head(location_feats).view(B, len(self.labels_order), len(location_map)))
         margins_logits = (self.margins_head(margins_feats).view(B, len(self.labels_order), len(margins_map)))
         pre_att_logits = (self.pre_att_head(pre_att_feats).view(B, len(self.labels_order), len(pre_att_map)))
