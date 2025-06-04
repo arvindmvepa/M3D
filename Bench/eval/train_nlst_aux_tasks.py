@@ -221,9 +221,9 @@ def compute_aux_loss(abnormality_type_logits, preexist_logits, interval_change_l
                      longest_diameter_reg_logits, longest_perp_diameter_reg_logits, abnormality_type_labels,
                      preexist_labels, location_labels, interval_change_labels, interval_growth_labels,
                      further_investigation_labels, margins_labels, pre_att_labels,
-                     longest_diameter_labels, longest_perpendicular_diameter_labels,
+                     longest_diameter_labels, longest_perp_diameter_labels,
                      num_labels=28):
-    B = area_logits.size(0)
+    B = abnormality_type_logits.size(0)
 
     abnormality_type_2d = abnormality_type_logits.view(B * num_labels, -1)
     abnormality_type_tgt_1d = abnormality_type_labels.view(B * num_labels)
@@ -337,7 +337,7 @@ class AuxVisionDataset(Dataset):
             "margins_labels",
             "pre_att_labels",
             "longest_diameter_labels",
-            "longest_perpendicular_diameter_labels",
+            "longest_perp_diameter_labels",
         ]
 
         # Load dictionary
