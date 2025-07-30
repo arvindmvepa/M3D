@@ -423,13 +423,13 @@ class VQABratsDataset(VQADataset):
             'answer_choice': answer,
             'question_type': 'open_ended',
             'qid': data.get("qid", 0),
-            'volume_file_id': data.get("volume_file_id"),
-            'volume_file_dir': data.get("volume_file_dir"),
+            'volume_file_id': data.get("volume_file_id", 0),
+            'volume_file_dir': data.get("volume_file_dir", ""),
             'question_clean': data.get("question"),
-            'label_name': data.get("label_name"),
-            'q_lang': data.get("q_lang"),
-            'content_type': data.get("content_type"),
-            'study_name': data.get("study_name"),
+            'label_name': data.get("label_name", ""),
+            'q_lang': data.get("q_lang", ""),
+            'content_type': data.get("content_type", ""),
+            'study_name': data.get("study_name", ""),
         }
         return ret
 
