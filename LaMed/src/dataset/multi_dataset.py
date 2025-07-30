@@ -422,7 +422,7 @@ class VQABratsDataset(VQADataset):
             'answer': answer,
             'answer_choice': answer,
             'question_type': 'open_ended',
-            'qid': data["qid"],
+            'qid': data.get("qid", 0),
             'volume_file_id': data["volume_file_id"],
             'volume_file_dir': data["volume_file_dir"],
             'question_clean': data["question"],
