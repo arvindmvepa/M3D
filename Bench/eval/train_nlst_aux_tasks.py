@@ -269,7 +269,7 @@ def evaluate(loader, model, device):
         out = model(img)
 
         # Get logits and apply sigmoid for probabilities
-        logits = out["logits"].squeeze(-1)  # Remove last dimension if present
+        logits = out.squeeze(-1)  # Remove last dimension if present
         probs = torch.sigmoid(logits)
 
         # Convert to binary predictions (threshold at 0.5)
@@ -397,6 +397,7 @@ def main():
             optimizer.step()
 
             total_loss += loss.item()
+            break
 
         avg_train_loss = total_loss / len(train_loader)
 
