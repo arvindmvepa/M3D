@@ -199,7 +199,6 @@ class VisionAuxClassifier(nn.Module):
         use_cls=False
     ):
         super().__init__()
-        self.labels_order = labels_order
         self.vision_tower = vision_tower
         self.use_cls = use_cls
         self.cls_hidden_dim = 768
