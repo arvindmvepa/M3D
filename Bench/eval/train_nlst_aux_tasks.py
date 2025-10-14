@@ -217,11 +217,11 @@ class VisionAuxClassifier(nn.Module):
         if self.use_cls:
             # collect cls and non-cls features
             cls_feats = feats[:, 0]
-            cls_feats = cls_feats.view(B, cls_hidden_dim)
+            cls_feats = cls_feats.view(B, self.cls_hidden_dim)
             mdl_feats = cls_feats
         else:
             non_cls_feats = feats[:, 1:]
-            non_cls_feats = non_cls_feats.view(B, non_cls_hidden_dim)
+            non_cls_feats = non_cls_feats.view(B, self.non_cls_hidden_dim)
             mdl_feats = non_cls_feats
 
         logits = self.cancer_head(mdl_feats).view(B, 1)
