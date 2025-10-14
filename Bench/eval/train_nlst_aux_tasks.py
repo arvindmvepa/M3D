@@ -67,7 +67,7 @@ def get_npy_path(volume_path, img_root="/local/amvepa91/nlst_npy"):
 
 
 def bce_loss(logits, labels):
-    return F.binary_cross_entropy(logits, labels.long())
+    return F.binary_cross_entropy_with_logits(logits, labels.float())
 
 
 @torch.no_grad()
@@ -97,7 +97,7 @@ def eval_baseline(loader, majority, mean_val, device):
 
 def compute_aux_loss(logits, targets):
 
-    cancer_loss = bce_loss(logits.squeeze(-1), targets.squeeze(-1).long())
+    cancer_loss = bce_loss(logits.squeeze(-1), targets.squeeze(-1))
     total_loss = cancer_loss
 
     return total_loss
