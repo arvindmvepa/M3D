@@ -97,7 +97,7 @@ def eval_baseline(loader, majority, mean_val, device):
 
 def compute_aux_loss(logits, targets):
 
-    cancer_loss = bce_loss(logits.squeeze(-1), targets.squeeze(-1))
+    cancer_loss = bce_loss(logits.squeeze(-1), targets.squeeze(-1).long())
     total_loss = cancer_loss
 
     return total_loss
@@ -265,7 +265,7 @@ def evaluate(loader, model, device):
     for batch in loader:
         img = batch["image"].to(device)
         target = batch["target"].to(device)
-        target = target.squeeze(-1)
+        target = target.squeeze(-1).long()
         out = model(img)
 
         # Get logits and apply sigmoid for probabilities
