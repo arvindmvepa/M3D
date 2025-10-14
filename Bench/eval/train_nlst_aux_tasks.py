@@ -204,9 +204,9 @@ class VisionAuxClassifier(nn.Module):
         self.cls_hidden_dim = 768
         self.non_cls_hidden_dim = 768 * 2048
         if self.use_cls:
-            self.cancer_head = nn.Linear(cls_hidden_dim, 1)
+            self.cancer_head = nn.Linear(self.cls_hidden_dim, 1)
         else:
-            self.cancer_head = nn.Linear(non_cls_hidden_dim, 1)
+            self.cancer_head = nn.Linear(self.non_cls_hidden_dim, 1)
 
     def forward(self, image):
         B = image.size(0)
