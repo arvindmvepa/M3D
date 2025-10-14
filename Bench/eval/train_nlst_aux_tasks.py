@@ -265,6 +265,7 @@ def evaluate(loader, model, device):
     for batch in loader:
         img = batch["image"].to(device)
         target = batch["target"].to(device)
+        target = target.squeeze(-1)
         out = model(img)
 
         # Get logits and apply sigmoid for probabilities
