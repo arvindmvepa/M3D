@@ -397,7 +397,6 @@ def main():
             optimizer.step()
 
             total_loss += loss.item()
-            break
 
         avg_train_loss = total_loss / len(train_loader)
 
