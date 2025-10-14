@@ -387,10 +387,13 @@ def main():
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1} [Train]"):
             image = batch["image"].to(device)
             targets = batch['target'].to(device)
+            print(f"image: {image}")
+            print(f"targets: {targets}")
 
             optimizer.zero_grad()
             logits = model(image)
 
+            print()
             loss = compute_aux_loss(logits, targets)
             loss.backward()
             optimizer.step()
