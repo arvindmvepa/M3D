@@ -392,7 +392,6 @@ def main():
             optimizer.zero_grad()
             logits = model(image)
 
-            print()
             loss = compute_aux_loss(logits, targets)
             loss.backward()
             optimizer.step()
