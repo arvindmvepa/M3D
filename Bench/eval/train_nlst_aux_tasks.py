@@ -225,7 +225,7 @@ class VisionAuxClassifier(nn.Module):
             mdl_feats = non_cls_feats
 
         logits = self.cancer_head(mdl_feats).view(B, 1)
-        return {"logits": logits}
+        return logits
 
 
 @dataclass
@@ -387,8 +387,6 @@ def main():
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1} [Train]"):
             image = batch["image"].to(device)
             targets = batch['target'].to(device)
-            print(f"image: {image}")
-            print(f"targets: {targets}")
 
             optimizer.zero_grad()
             logits = model(image)
