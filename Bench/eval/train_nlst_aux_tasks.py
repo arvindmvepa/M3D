@@ -97,7 +97,7 @@ def eval_baseline(loader, majority, mean_val, device):
 
 def compute_aux_loss(logits, targets):
 
-    cancer_loss = bce_loss(logits, targets)
+    cancer_loss = bce_loss(logits.squeeze(-1), targets.squeeze(-1))
     total_loss = cancer_loss
 
     return total_loss
