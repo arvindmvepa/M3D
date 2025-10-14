@@ -18,128 +18,9 @@ from dataclasses import dataclass, field
 from transformers import HfArgumentParser
 
 import monai.transforms as mtf
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, roc_auc_score, accuracy_score, f1_score, precision_score, recall_score
 from dataclasses import dataclass, field
 from LaMed.src.model.language_model import LamedLlamaForCausalLM, LamedPhi3ForCausalLM
-
-
-labels_order = [
-            "NA",
-            "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
-            "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
-            "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
-            "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
-            "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
-            "Non-calcified micronodule(s) (opacity < 4 mm diameter)",
-            "Benign lung nodule(s) (benign calcification)",
-            "Atelectasis, segmental or greater",
-            "Pleural thickening or effusion",
-            "Non-calcified hilar/mediastinal adenopathy or mass (>= 10 mm on short axis)",
-            "Chest wall abnormality",
-            "Consolidation",
-            "Emphysema",
-            "Significant cardiovascular abnormality",
-            "Significant cardiovascular abnormality",
-            "Reticular/reticulonodular opacities",
-            "6 or more nodules, not suspicious for cancer (opacity >= 4 mm)",
-            "Other potentially significant abnormality above the diaphragm",
-            "Other potentially significant abnormality above the diaphragm",
-            "Other potentially significant abnormality above the diaphragm",
-            "Other potentially significant abnormality above the diaphragm",
-            "Other potentially significant abnormality below the diaphragm",
-            "Other potentially significant abnormality below the diaphragm",
-            "Other potentially significant abnormality below the diaphragm",
-            "Other minor abnormality noted",
-            "Other minor abnormality noted",
-            "Other minor abnormality noted"
-        ]
-
-
-sct_ab_code_dict = {
-    51: "Non-calcified nodule or mass (opacity >= 4 mm diameter)",
-    52: "Non-calcified micronodule(s) (opacity < 4 mm diameter)",
-    53: "Benign lung nodule(s) (benign calcification)",
-    54: "Atelectasis, segmental or greater",
-    55: "Pleural thickening or effusion",
-    56: "Non-calcified hilar/mediastinal adenopathy or mass (>= 10 mm on short axis)",
-    57: "Chest wall abnormality",
-    58: "Consolidation",
-    59: "Emphysema",
-    60: "Significant cardiovascular abnormality",
-    61: "Reticular/reticulonodular opacities",
-    62: "6 or more nodules, not suspicious for cancer (opacity >= 4 mm)",
-    63: "Other potentially significant abnormality above the diaphragm",
-    64: "Other potentially significant abnormality below the diaphragm",
-    65: "Other minor abnormality noted",
-    # .M, .N, etc. can be mapped as needed. If numeric codes are stored as strings, adjust keys accordingly
-}
-
-sct_epi_loc_dict = {
-    1: "Right Upper Lobe",
-    2: "Right Middle Lobe",
-    3: "Right Lower Lobe",
-    4: "Left Upper Lobe",
-    5: "Lingula",
-    6: "Left Lower Lobe",
-    8: "Other (see comments)",
-    # .N => "Not Applicable", etc.
-}
-
-sct_margins_dict = {
-    1: "Spiculated (Stellate)",
-    2: "Smooth",
-    3: "Poorly defined",
-    9: "Unable to determine",
-    # .N => "Not applicable", etc.
-}
-
-sct_pre_att_dict = {
-    1: "Soft Tissue",
-    2: "Ground glass",
-    3: "Mixed",
-    4: "Fluid/water",
-    6: "Fat",
-    7: "Other",
-    9: "Unable to determine"
-    # .M => "Missing", .N => "Not applicable", etc.
-}
-
-sct_ab_attn_dict = {
-    1: "No interval change in attenuation",
-    2: "Yes, suspicious change in attenuation",
-    9: "Unable to determine"
-    # .M => "Missing", .N => "Not applicable", etc.
-}
-
-sct_ab_gwth_dict = {
-    1: "No interval growth",
-    2: "Yes, interval growth",
-    9: "Unable to determine"
-    # .N => "Not applicable"
-}
-
-sct_ab_invg_dict = {
-    1: "No further investigation needed",
-    2: "Yes, warrants further investigation",
-    9: "Unable to determine"
-    # .M => "Missing", .N => "Not applicable"
-}
-
-sct_ab_preexist_dict = {
-    1: "No",
-    2: "Yes",
-    9: "Unable to determine"
-    # .M => "Missing"
-}
-
-abnormality_type_map = {sct_ab_code_dict.get(key, "NA"): index for index, key in enumerate(["NA"] + sorted(sct_ab_code_dict.keys()))}
-location_map = {sct_epi_loc_dict.get(key, "NA"): index for index, key in enumerate(["NA"] + sorted(sct_epi_loc_dict.keys()))}
-margins_map = {sct_margins_dict.get(key, "NA"): index for index, key in enumerate(["NA"] + sorted(sct_margins_dict.keys()))}
-pre_att_map = {sct_pre_att_dict.get(key, "NA"): index for index, key in enumerate(["NA"] + sorted(sct_pre_att_dict.keys()))}
-interval_change_map = {sct_ab_attn_dict.get(key, "NA"): index for index, key in enumerate(["NA"] + sorted(sct_ab_attn_dict.keys()))}
-interval_growth_map = {sct_ab_gwth_dict.get(key, "NA"): index for index, key in enumerate(["NA"] + sorted(sct_ab_gwth_dict.keys()))}
-further_investigation_map = {sct_ab_invg_dict.get(key, "NA"): index for index, key in enumerate(["NA"] + sorted(sct_ab_invg_dict.keys()))}
-ab_preexist_map = {sct_ab_preexist_dict.get(key, "NA"): index for index, key in enumerate(["NA"] + sorted(sct_ab_preexist_dict.keys()))}
 
 
 def setup_logger(log_file="training.log", log_to_console=True):
@@ -185,47 +66,8 @@ def get_npy_path(volume_path, img_root="/local/amvepa91/nlst_npy"):
     return volume_path_npy
 
 
-def ce_loss(logits, labels):
-    return F.cross_entropy(logits, labels.long())
-
-def argmax_ignore_nan(logits: torch.Tensor):
-    """[B,L,C] -> [B,L] int64; logits can be float32/16."""
-    return torch.argmax(logits, dim=-1)
-
-@torch.no_grad()
-def accuracy(pred: torch.Tensor, tgt: torch.Tensor):
-    """Both [N] int64; returns float in [0,1]."""
-    valid = torch.isfinite(tgt)
-    if valid.sum() == 0:     # no valid labels
-        return 0.0
-    return (pred[valid] == tgt[valid]).float().mean().item()
-
-# ----------------------------------------------------------------------
-#  gather labels over a dataset to build majority / mean baselines
-# ----------------------------------------------------------------------
-def collect_labels(loader, device):
-    store = collections.defaultdict(list)
-    for batch in tqdm(loader, desc="[collect]", leave=False):
-        for k, v in batch["label_dict"].items():           # v: [B, L]
-            store[k].append(v.to(device))
-    return {k: torch.cat(v, dim=0) for k, v in store.items()}
-
-def build_baseline(train_labels):
-    majority, mean_val = {}, {}
-    for k, mat in train_labels.items():       # mat: [N, L]
-        if "diameter" in k:                   # regression head
-            # ignore NaNs when taking mean
-            mask = torch.isfinite(mat)
-            mean = torch.where(mask, mat, torch.tensor(0., device=mat.device))
-            mean_val[k] = (mean.sum(0) / mask.float().sum(0).clamp(min=1)).cpu()   # [L]
-        else:                                 # classification head
-            modes = []
-            for l in range(mat.size(1)):      # per-label majority
-                col = mat[:, l][torch.isfinite(mat[:, l])]
-                mode = torch.mode(col.long(), keepdim=False).values.item() if col.numel() else 0
-                modes.append(mode)
-            majority[k] = torch.tensor(modes, device="cpu")                       # [L]
-    return majority, mean_val
+def bce_loss(logits, labels):
+    return F.binary_cross_entropy(logits, labels.long())
 
 
 @torch.no_grad()
@@ -253,95 +95,12 @@ def eval_baseline(loader, majority, mean_val, device):
     return out
 
 
-def mse_ignore_nan(pred: torch.Tensor,
-                   target: torch.Tensor,
-                   reduction: str = "mean") -> torch.Tensor:
-    """
-    pred   : arbitrary shape, float
-    target : same shape as pred, may contain NaNs
-    reduction : "mean" | "sum" | "none"
-    Returns 0 (if every element is NaN) so the rest of the loss can still back-prop.
-    """
-    mask = torch.isfinite(target)          # False where NaN or ±Inf
-    if reduction == "none":
-        out = (pred - target).pow(2)
-        out[~mask] = 0.0                   # keep shape, zero-out ignored slots
-        return out
+def compute_aux_loss(logits, targets):
 
-    if mask.sum() == 0:                    # all targets are invalid
-        return torch.tensor(0.0,
-                            device=pred.device,
-                            dtype=pred.dtype,
-                            requires_grad=pred.requires_grad)
+    cancer_loss = bce_loss(logits, targets)
+    total_loss = cancer_loss
 
-    diff2 = (pred[mask] - target[mask]).pow(2)
-    return diff2.mean() if reduction == "mean" else diff2.sum()
-
-
-def compute_aux_loss(abnormality_type_logits, preexist_logits, interval_change_logits, interval_growth_logits,
-                     location_logits, further_investigation_logits, margins_logits, pre_att_logits,
-                     longest_diameter_reg_logits, longest_perp_diameter_reg_logits, abnormality_type_labels,
-                     preexist_labels, location_labels, interval_change_labels, interval_growth_labels,
-                     further_investigation_labels, margins_labels, pre_att_labels,
-                     longest_diameter_labels, longest_perp_diameter_labels,
-                     num_labels=28):
-    B = abnormality_type_logits.size(0)
-
-    abnormality_type_2d = abnormality_type_logits.view(B * num_labels, -1)
-    abnormality_type_tgt_1d = abnormality_type_labels.view(B * num_labels)
-    abnormality_type_loss = ce_loss(abnormality_type_2d, abnormality_type_tgt_1d)
-
-    preexist_2d = preexist_logits.view(B * num_labels, -1)
-    preexist_tgt_1d = preexist_labels.view(B * num_labels)
-    preexist_loss = ce_loss(preexist_2d, preexist_tgt_1d)
-
-    location_2d = location_logits.view(B * num_labels, -1)
-    location_tgt_1d = location_labels.view(B * num_labels)
-    location_loss = ce_loss(location_2d, location_tgt_1d)
-
-    interval_change_2d = interval_change_logits.view(B * num_labels, -1)
-    interval_change_tgt_1d = interval_change_labels.view(B * num_labels)
-    interval_change_loss = ce_loss(interval_change_2d, interval_change_tgt_1d)
-
-    interval_growth_2d = interval_growth_logits.view(B * num_labels, -1)
-    interval_growth_tgt_1d = interval_growth_labels.view(B * num_labels)
-    interval_growth_loss = ce_loss(interval_growth_2d, interval_growth_tgt_1d)
-
-    further_investigation_2d = further_investigation_logits.view(B * num_labels, -1)
-    further_investigation_tgt_1d = further_investigation_labels.view(B * num_labels)
-    further_investigation_loss = ce_loss(further_investigation_2d, further_investigation_tgt_1d)
-
-    margins_2d = margins_logits.view(B * num_labels, -1)
-    margins_tgt_1d = margins_labels.view(B * num_labels)
-    margins_loss = ce_loss(margins_2d, margins_tgt_1d)
-
-    pre_att_2d = pre_att_logits.view(B * num_labels, -1)
-    pre_att_tgt_1d = pre_att_labels.view(B * num_labels)
-    pre_att_loss = ce_loss(pre_att_2d, pre_att_tgt_1d)
-
-    longest_diameter_reg_2d = longest_diameter_reg_logits.view(B * num_labels)
-    longest_diameter_tgt_1d = longest_diameter_labels.view(B * num_labels)
-    longest_diameter_loss = mse_ignore_nan(longest_diameter_reg_2d, longest_diameter_tgt_1d)
-
-    longest_perp_diameter_reg_2d = longest_perp_diameter_reg_logits.view(B * num_labels)
-    longest_perp_diameter_tgt_1d = longest_perp_diameter_labels.view(B * num_labels)
-    longest_perp_diameter_loss = mse_ignore_nan(longest_perp_diameter_reg_2d, longest_perp_diameter_tgt_1d)
-
-    total_loss = abnormality_type_loss + preexist_loss + location_loss + interval_change_loss + interval_growth_loss + \
-        further_investigation_loss + margins_loss + pre_att_loss
-    loss_dict = {
-        "abnormality_type_loss": abnormality_type_loss.item(),
-        "preexist_loss": preexist_loss.item(),
-        "location_loss": location_loss.item(),
-        "interval_change_loss": interval_change_loss.item(),
-        "interval_growth_loss": interval_growth_loss.item(),
-        "further_investigation_loss": further_investigation_loss.item(),
-        "margins_loss": margins_loss.item(),
-        "pre_att_loss": pre_att_loss.item(),
-        "longest_diameter_loss": longest_diameter_loss.item(),
-        "longest_perp_diameter_loss": longest_perp_diameter_loss.item()
-    }
-    return total_loss, loss_dict
+    return total_loss
 
 
 class AuxVisionDataset(Dataset):
@@ -350,57 +109,6 @@ class AuxVisionDataset(Dataset):
         super().__init__()
         self.mode = mode
         self.transform = transform
-
-        self.labels_order = labels_order
-        self.abnormality_type_0_index = 0
-        self.abnormality_type_1_start_index = 1
-        self.abnormality_type_1_end_index = 5
-        self.abnormality_type_2_index = 6
-        self.abnormality_type_3_index = 7
-        self.abnormality_type_4_index = 8
-        self.abnormality_type_5_index = 9
-        self.abnormality_type_6_index = 10
-        self.abnormality_type_7_index = 11
-        self.abnormality_type_8_index = 12
-        self.abnormality_type_9_index = 13
-        self.abnormality_type_10_start_index = 14
-        self.abnormality_type_10_end_index = 15
-        self.abnormality_type_11_index = 16
-        self.abnormality_type_12_index = 17
-        self.abnormality_type_13_start_index = 18
-        self.abnormality_type_13_end_index = 21
-        self.abnormality_type_14_start_index = 22
-        self.abnormality_type_14_end_index = 24
-        self.abnormality_type_15_start_index = 25
-        self.abnormality_type_15_end_index = 27
-        self.abnormality_type_index_map = {0: self.abnormality_type_0_index,
-                                           1: (self.abnormality_type_1_start_index, self.abnormality_type_1_end_index),
-                                           2: self.abnormality_type_2_index,
-                                           3: self.abnormality_type_3_index,
-                                           4: self.abnormality_type_4_index,
-                                           5: self.abnormality_type_5_index,
-                                           6: self.abnormality_type_6_index,
-                                           7: self.abnormality_type_7_index,
-                                           8: self.abnormality_type_8_index,
-                                           9: self.abnormality_type_9_index,
-                                           10: (self.abnormality_type_10_start_index, self.abnormality_type_10_end_index),
-                                           11: self.abnormality_type_11_index,
-                                           12: self.abnormality_type_12_index,
-                                           13: (self.abnormality_type_13_start_index, self.abnormality_type_13_end_index),
-                                           14: (self.abnormality_type_14_start_index, self.abnormality_type_14_end_index),
-                                           15: (self.abnormality_type_15_start_index, self.abnormality_type_15_end_index)}
-        self.question_keys = [
-            "abnormality_type_labels",
-            "preexist_labels",
-            "location_labels",
-            "interval_change_labels",
-            "interval_growth_labels",
-            "further_investigation_labels",
-            "margins_labels",
-            "pre_att_labels",
-            "longest_diameter_labels",
-            "longest_perp_diameter_labels",
-        ]
 
         # Load dictionary
         with open(json_path, "r") as f:
@@ -411,7 +119,7 @@ class AuxVisionDataset(Dataset):
             self.samples.append({
                 "img_files": datum_dict["img_files"],
                 "filters": datum_dict["filters"],
-                "content_info": datum_dict["content_info"]
+                "target": datum_dict["numeric_answer"]
             })
 
         # If no transform is provided, define a default
@@ -442,6 +150,7 @@ class AuxVisionDataset(Dataset):
         best_filter_index = self.best_filter_index(filters)
         img_file = img_files[best_filter_index]
         img_file_npy = get_npy_path(img_file)
+        target = data["target"]
 
         # Load img file
         img_npy = np.load(img_file_npy)
@@ -449,55 +158,9 @@ class AuxVisionDataset(Dataset):
         if self.transform is not None:
             img_tensor = self.transform(img_npy)
 
-        ci = data["content_info"]
-        abnormality_type_lst = ci["abnormality_type"]
-        pre_existing_lst = ci["pre_existing"]
-        location_lst = ci["location"]
-        interval_change_lst = ci["interval_change"]
-        interval_growth_lst = ci["interval_growth"]
-        further_investigation_lst = ci["further_investigation"]
-        margins_lst = ci["margins"]
-        predominant_attenuation_lst = ci["predominant_attenuation"]
-        longest_diameter_lst = ci["longest_diameter"]
-        longest_perp_diameter_lst = ci["longest_perpendicular_diameter"]
-
-        # make one *independent* row per abnormality type
-        label_list = [[] for _ in range(len(self.labels_order))]
-
-        for k, abn_type in enumerate(abnormality_type_lst):
-            target_indices = self.abnormality_type_index_map[abn_type]
-
-            # convert single int → tuple for unified handling
-            if isinstance(target_indices, int):
-                target_indices = (target_indices, target_indices)
-
-            for row_idx in range(target_indices[0], target_indices[1] + 1):
-                if not label_list[row_idx]:
-                    label_list[row_idx] = [
-                        1,
-                        pre_existing_lst[k],
-                        location_lst[k],
-                        interval_change_lst[k],
-                        interval_growth_lst[k],
-                        further_investigation_lst[k],
-                        margins_lst[k],
-                        predominant_attenuation_lst[k],
-                        longest_diameter_lst[k],
-                        longest_perp_diameter_lst[k],
-                    ]
-                    break
-
-        # fill missing rows with zeros / NaNs
-        for r in range(len(label_list)):
-            if not label_list[r]:
-                label_list[r] = [0, 0, 0, 0, 0, 0, 0, 0, float("nan"), float("nan")]
-
-        label_t = np.array(label_list, dtype=np.float32).T
-        label_dict = {k: torch.tensor(label_t[i]) for i, k in enumerate(self.question_keys)}
-
         return {
             "image": img_tensor,
-            "label_dict": label_dict,
+            "target": target,
         }
 
     def convert_file_path_to_npy(self, image_abs_path):
@@ -539,33 +202,12 @@ class VisionAuxClassifier(nn.Module):
         self.labels_order = labels_order
         self.vision_tower = vision_tower
         self.use_cls = use_cls
+        self.cls_hidden_dim = 768
+        self.non_cls_hidden_dim = 768 * 2048
         if self.use_cls:
-            cls_hidden_dim = 768
-            non_cls_hidden_dim = 768 * 2048
-
-            self.abnormality_type_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(abnormality_type_map))
-            self.location_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(location_map))
-            self.margins_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(margins_map))
-            self.pre_att_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(pre_att_map))
-            self.interval_change_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(interval_change_map))
-            self.interval_growth_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order) * len(interval_growth_map))
-            self.further_investigation_head = nn.Linear(cls_hidden_dim, len(self.labels_order) * len(further_investigation_map))
-            self.preexist_head = nn.Linear(cls_hidden_dim, len(self.labels_order) * len(ab_preexist_map))
-            self.longest_diameter_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order))
-            self.longest_perpendicular_diameter_head = nn.Linear(non_cls_hidden_dim, len(self.labels_order))
+            self.cancer_head = nn.Linear(cls_hidden_dim, 1)
         else:
-            hidden_dim = 768 * 2048
-
-            self.abnormality_type_head = nn.Linear(hidden_dim, len(self.labels_order) * len(abnormality_type_map))
-            self.location_head = nn.Linear(hidden_dim, len(self.labels_order) * len(location_map))
-            self.margins_head = nn.Linear(hidden_dim, len(self.labels_order) * len(margins_map))
-            self.pre_att_head = nn.Linear(hidden_dim, len(self.labels_order) * len(pre_att_map))
-            self.interval_change_head = nn.Linear(hidden_dim, len(self.labels_order) * len(interval_change_map))
-            self.interval_growth_head = nn.Linear(hidden_dim, len(self.labels_order) * len(interval_growth_map))
-            self.further_investigation_head = nn.Linear(hidden_dim, len(self.labels_order) * len(further_investigation_map))
-            self.preexist_head = nn.Linear(hidden_dim, len(self.labels_order) * len(ab_preexist_map))
-            self.longest_diameter_head = nn.Linear(hidden_dim, len(self.labels_order))
-            self.longest_perpendicular_diameter_head = nn.Linear(hidden_dim, len(self.labels_order))
+            self.cancer_head = nn.Linear(non_cls_hidden_dim, 1)
 
     def forward(self, image):
         B = image.size(0)
@@ -576,63 +218,15 @@ class VisionAuxClassifier(nn.Module):
         if self.use_cls:
             # collect cls and non-cls features
             cls_feats = feats[:, 0]
-            cls_feats = cls_feats.view(B, -1)
-            non_cls_feats = feats[:, 1:]
-            non_cls_feats = non_cls_feats.view(B, -1)
-            # model features
-            abnormality_type_feats = non_cls_feats
-            location_feats = non_cls_feats
-            margins_feats = non_cls_feats
-            pre_att_feats = non_cls_feats
-            interval_change_feats = non_cls_feats
-            interval_growth_feats = non_cls_feats
-            further_investigation_feats = cls_feats
-            preexist_feats = cls_feats
-            longest_diameter_feats = non_cls_feats
-            longest_perpendicular_diameter_feats = non_cls_feats
+            cls_feats = cls_feats.view(B, cls_hidden_dim)
+            mdl_feats = cls_feats
         else:
-            feats = feats.view(B, -1)
-            # model features
-            abnormality_type_feats = feats
-            location_feats = feats
-            margins_feats = feats
-            pre_att_feats = feats
-            interval_change_feats = feats
-            interval_growth_feats = feats
-            further_investigation_feats = feats
-            preexist_feats = feats
-            longest_diameter_feats = feats
-            longest_perpendicular_diameter_feats = feats
+            non_cls_feats = feats[:, 1:]
+            non_cls_feats = non_cls_feats.view(B, non_cls_hidden_dim)
+            mdl_feats = non_cls_feats
 
-        abnormality_type_logits = self.abnormality_type_head(abnormality_type_feats).view(B, len(self.labels_order), len(abnormality_type_map))
-        location_logits = (self.location_head(location_feats).view(B, len(self.labels_order), len(location_map)))
-        margins_logits = (self.margins_head(margins_feats).view(B, len(self.labels_order), len(margins_map)))
-        pre_att_logits = (self.pre_att_head(pre_att_feats).view(B, len(self.labels_order), len(pre_att_map)))
-        interval_change_logits = (self.interval_change_head(interval_change_feats).view(B,
-                                                                                        len(self.labels_order),
-                                                                                        len(interval_change_map)))
-        interval_growth_logits = (self.interval_growth_head(interval_growth_feats).view(B,
-                                                                                        len(self.labels_order),
-                                                                                        len(interval_growth_map)))
-        further_investigation_logits = (self.further_investigation_head(further_investigation_feats).view(B,
-                                                                                                          len(self.labels_order),
-                                                                                                          len(further_investigation_map)))
-        preexist_logits = (self.preexist_head(preexist_feats).view(B, len(self.labels_order), len(ab_preexist_map)))
-        longest_diameter_reg_logits = self.longest_diameter_head(longest_diameter_feats).view(B, len(self.labels_order))
-        longest_perp_diameter_reg_logits = self.longest_perpendicular_diameter_head(longest_perpendicular_diameter_feats).view(B, len(self.labels_order))
-
-        return {
-            "abnormality_type_logits": abnormality_type_logits,
-            "location_logits": location_logits,
-            "margins_logits": margins_logits,
-            "pre_att_logits": pre_att_logits,
-            "interval_change_logits": interval_change_logits,
-            "interval_growth_logits": interval_growth_logits,
-            "further_investigation_logits": further_investigation_logits,
-            "preexist_logits": preexist_logits,
-            "longest_diameter_reg_logits": longest_diameter_reg_logits,
-            "longest_perp_diameter_reg_logits": longest_perp_diameter_reg_logits,
-        }
+        logits = self.cancer_head(mdl_feats).view(B, 1)
+        return {"logits": logits}
 
 
 @dataclass
@@ -656,64 +250,60 @@ class VisionTrainingArguments:
     batch_size: int = 4
     num_epochs: int = 5
     learning_rate: float = 1e-4
-    output_dir: str = "./nlst_vision_aux_output"
+    output_dir: str = "./nlst_vision_cancer_aux_output"
     device: str = "cuda"
     tag: str = ""
     use_cls: bool = True
 
 
-def _masked_acc(pred, tgt):
-    mask = torch.isfinite(tgt)
-    if mask.sum() == 0:
-        return 0.0
-    return (pred[mask] == tgt[mask]).float().mean().item()
-
-def _masked_mse(pred, tgt):
-    mask = torch.isfinite(tgt)
-    if mask.sum() == 0:
-        return 0.0
-    return ((pred[mask] - tgt[mask]) ** 2).mean().item()
-
-@torch.no_grad()
 def evaluate(loader, model, device):
     model.eval()
-    agg = collections.defaultdict(float)   # metric accumulators
-    cnt = collections.defaultdict(int)
+
+    all_predictions = []
+    all_targets = []
+    all_logits = []
 
     for batch in loader:
-        img   = batch["image"].to(device)
-        label = {k: v.to(device) for k, v in batch["label_dict"].items()}
-        out   = model(img)
+        img = batch["image"].to(device)
+        target = batch["target"].to(device)
+        out = model(img)
 
-        # categorical heads -------------------------------------------------
-        for key_pred, key_tgt in [
-            ("abnormality_type_logits",   "abnormality_type_labels"),
-            ("preexist_logits",           "preexist_labels"),
-            ("location_logits",           "location_labels"),
-            ("interval_change_logits",    "interval_change_labels"),
-            ("interval_growth_logits",    "interval_growth_labels"),
-            ("further_investigation_logits", "further_investigation_labels"),
-            ("margins_logits",            "margins_labels"),
-            ("pre_att_logits",            "pre_att_labels"),
-        ]:
-            p = torch.argmax(out[key_pred], -1).flatten()
-            t = label[key_tgt].long().flatten()
-            agg[key_pred.replace("_logits", "_acc")] += _masked_acc(p, t) * len(p)
-            cnt[key_pred.replace("_logits", "_acc")] += len(p)
+        # Get logits and apply sigmoid for probabilities
+        logits = out["logits"].squeeze(-1)  # Remove last dimension if present
+        probs = torch.sigmoid(logits)
 
-        # regression heads --------------------------------------------------
-        pred_diam  = out["longest_diameter_reg_logits"].flatten()
-        tgt_diam   = label["longest_diameter_labels"].flatten()
-        agg["longest_diameter_mse"] += _masked_mse(pred_diam, tgt_diam) * len(pred_diam)
-        cnt["longest_diameter_mse"] += len(pred_diam)
+        # Convert to binary predictions (threshold at 0.5)
+        preds = (probs > 0.5).long()
 
-        pred_perp = out["longest_perp_diameter_reg_logits"].flatten()
-        tgt_perp  = label["longest_perp_diameter_labels"].flatten()
-        agg["longest_perp_diameter_mse"] += _masked_mse(pred_perp, tgt_perp) * len(pred_perp)
-        cnt["longest_perp_diameter_mse"] += len(pred_perp)
+        # Collect all results
+        all_logits.extend(probs.cpu().numpy())
+        all_predictions.extend(preds.cpu().numpy())
+        all_targets.extend(target.cpu().numpy())
 
-    # average over dataset
-    return {k: agg[k] / max(1, cnt[k]) for k in agg}
+    # Convert to numpy arrays
+    all_predictions = np.array(all_predictions)
+    all_targets = np.array(all_targets)
+    all_logits = np.array(all_logits)
+
+    # Calculate metrics
+    accuracy = accuracy_score(all_targets, all_predictions)
+    f1 = f1_score(all_targets, all_predictions)
+    precision = precision_score(all_targets, all_predictions, zero_division=0)
+    recall = recall_score(all_targets, all_predictions, zero_division=0)
+
+    # AUC (only if we have both classes)
+    if len(np.unique(all_targets)) > 1:
+        auc = roc_auc_score(all_targets, all_logits)
+    else:
+        auc = 0.0  # Cannot compute AUC with only one class
+
+    return {
+        "accuracy": accuracy,
+        "f1_score": f1,
+        "precision": precision,
+        "recall": recall,
+        "auc": auc
+    }
 
 
 def main():
@@ -730,9 +320,9 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     # Example JSON paths for training
-    train_file = "/local2/amvepa91/MedTrinity-25M/nlst_train_aux_vqa_delta2True_v3.json"
-    val_file = "/local2/amvepa91/MedTrinity-25M/nlst_val_aux_vqa_delta2True_v3.json"
-    test_file = "/local2/amvepa91/MedTrinity-25M/nlst_test_aux_vqa_delta2True_v3.json"
+    train_file = "/local2/amvepa91/MedTrinity-25M/nlst_aux_cancer_train_v4.json"
+    val_file = "/local2/amvepa91/MedTrinity-25M/nlst_aux_cancer_val_v4.json"
+    test_file = "/local2/amvepa91/MedTrinity-25M/nlst_aux_cancer_test_v4.json"
 
     if 'llama' in args.model_type.lower():
         base_model = LamedLlamaForCausalLM.from_pretrained(args.model_name_or_path)
@@ -780,19 +370,6 @@ def main():
     val_loader = DataLoader(val_dataset,   batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset,  batch_size=args.batch_size, shuffle=False)
 
-    train_lbls = collect_labels(train_loader, device)
-    majority_cls, mean_reg = build_baseline(train_lbls)
-
-    logger.info("Majority / mean computed from train set:")
-    logger.info(str({**majority_cls, **mean_reg}))
-
-    logger.info("Baseline on train:")
-    logger.info(str(eval_baseline(train_loader, majority_cls, mean_reg, device)))
-    logger.info("Baseline on val:")
-    logger.info(str(eval_baseline(val_loader, majority_cls, mean_reg, device)))
-    logger.info("Baseline on test:")
-    logger.info(str(eval_baseline(test_loader, majority_cls, mean_reg, device)))
-
     logger.info(f"Dataset sizes => train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
 
     # -----------------------------------------------------------
@@ -800,7 +377,6 @@ def main():
     # -----------------------------------------------------------
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
     best_val_loss = float('inf')
-    best_val_score = -float("inf")  # higher = better
     best_model_path = os.path.join(output_dir, "best_model.pt")
 
     # Training Loop
@@ -811,25 +387,20 @@ def main():
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1} [Train]"):
             image = batch["image"].to(device)
-            label_dict = {k: v.to(device) for k, v in batch["label_dict"].items()}
+            targets = batch['target'].to(device)
 
             optimizer.zero_grad()
-            results = model(image)
+            logits = model(image)
 
-            loss, loss_dict = compute_aux_loss(**results, **label_dict,
-                                               num_labels=len(labels_order))
+            loss = compute_aux_loss(logits, targets)
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item()
-            for k, v in loss_dict.items():
-                comp_sums[k] += v
 
         avg_train_loss = total_loss / len(train_loader)
-        comp_means = {k: v / len(train_loader) for k, v in comp_sums.items()}
 
-        logger.info(f"[Epoch {epoch + 1}] Train loss = {avg_train_loss:.5f} " +
-                    " ".join([f"{k}={v:.4f}" for k, v in comp_means.items()]))
+        logger.info(f"[Epoch {epoch + 1}] Train loss = {avg_train_loss:.5f}")
         model.eval()
         val_total_loss = 0.0
         val_comp_sums = collections.defaultdict(float)
@@ -837,23 +408,18 @@ def main():
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Epoch {epoch + 1} [Val]"):
                 image = batch["image"].to(device)
-                label_dict = {k: v.to(device) for k, v in batch["label_dict"].items()}
+                target = batch["target"].to(device)
 
-                outputs = model(image)
-                v_loss, v_loss_dict = compute_aux_loss(**outputs, **label_dict,
-                                                       num_labels=len(labels_order))
+                logits = model(image)
+                v_loss = compute_aux_loss(logits, target)
 
                 val_total_loss += v_loss.item()
-                for k, v in v_loss_dict.items():
-                    val_comp_sums[k] += v
 
         avg_val_loss = val_total_loss / len(val_loader)
         val_metrics = evaluate(val_loader, model, device)
-        val_comp_means = {k: v / len(val_loader) for k, v in val_comp_sums.items()}
 
         logger.info(f"[Epoch {epoch + 1}]  Val loss = {avg_val_loss:.5f} " +
-                    " ".join([f"{k}={v:.4f}" for k, v in val_comp_means.items()])
-                    + " ".join([f"{k}={v:.4f}" for k, v in val_metrics.items()]))
+                    " ".join([f"{k}={v:.4f}" for k, v in val_metrics.items()]))
 
         # ------------- save best checkpoint ------------------- #
         if avg_val_loss < best_val_loss:
@@ -869,28 +435,22 @@ def main():
     model.eval()
 
     test_total_loss = 0.0
-    test_comp_sums = collections.defaultdict(float)
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="[Test]"):
             image = batch["image"].to(device)
-            label_dict = {k: v.to(device) for k, v in batch["label_dict"].items()}
+            target = batch["target"].to(device)
 
-            outputs = model(image)
-            t_loss, t_loss_dict = compute_aux_loss(**outputs, **label_dict,
-                                                   num_labels=len(labels_order))
+            logits = model(image)
+            t_loss = compute_aux_loss(logits, target)
 
             test_total_loss += t_loss.item()
-            for k, v in t_loss_dict.items():
-                test_comp_sums[k] += v
 
     avg_test_loss = test_total_loss / len(test_loader)
-    test_comp_means = {k: v / len(test_loader) for k, v in test_comp_sums.items()}
     test_metrics = evaluate(test_loader, model, device)
 
     logger.info(f"Best-val model Test loss = {avg_test_loss:.5f} " +
-                " ".join([f"{k}={v:.4f}" for k, v in test_comp_means.items()])
-                + " ".join([f"{k}={v:.4f}" for k, v in test_metrics.items()]))
+                " ".join([f"{k}={v:.4f}" for k, v in test_metrics.items()]))
 
 
 if __name__ == "__main__":
