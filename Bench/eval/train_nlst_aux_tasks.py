@@ -265,7 +265,7 @@ def evaluate(loader, model, device):
     for batch in loader:
         img = batch["image"].to(device)
         target = batch["target"].to(device)
-        target = target.squeeze(-1).long()
+        target = target.squeeze(-1).long() # Remove last dimension if present
         out = model(img)
 
         # Get logits and apply sigmoid for probabilities
@@ -276,9 +276,9 @@ def evaluate(loader, model, device):
         preds = (probs > 0.5).long()
 
         # Collect all results
-        all_logits.extend(probs.cpu().numpy())
-        all_predictions.extend(preds.cpu().numpy())
-        all_targets.extend(target.cpu().numpy())
+        all_logits.extend(probs.detach().cpu().numpy())
+        all_predictions.extend(preds.detach().cpu().numpy())
+        all_targets.extend(target.detach().cpu().numpy())
 
     # Convert to numpy arrays
     all_predictions = np.array(all_predictions)
