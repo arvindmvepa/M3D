@@ -220,7 +220,7 @@ class VisionAuxClassifier(nn.Module):
             cls_feats = cls_feats.view(B, self.cls_hidden_dim)
             mdl_feats = cls_feats
         else:
-            non_cls_feats = feats[:, 1:]
+            non_cls_feats = feats
             non_cls_feats = non_cls_feats.view(B, self.non_cls_hidden_dim)
             mdl_feats = non_cls_feats
 
