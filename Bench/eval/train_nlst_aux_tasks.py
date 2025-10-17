@@ -174,10 +174,11 @@ class AuxVisionDataset(Dataset):
 
     def _priority(self, kernel) -> int:
         """Return an integer priority; lower = better for lung work."""
-        for rank, pattern in _RULES:
-            if pattern.search(kernel):
-                return rank
-        return 9  # should never hit because last rule is '.*'
+        if isinstance(kernel, str):
+            for rank, pattern in _RULES:
+                if pattern.search(kernel):
+                    return rank
+        return 9 
 
     def best_filter_index(self, filters) -> int:
         """
