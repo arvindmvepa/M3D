@@ -58,7 +58,7 @@ _RULES = [
 ]
 
 
-def get_npy_path(volume_path, img_root="/local/amvepa91/nlst_npy"):
+def get_npy_path(volume_path, img_root="/data/lung/nlst/NLST_CT_npy"):
     volume_name = os.path.basename(volume_path)
     time_point_dir = os.path.basename(os.path.dirname(volume_path))
     pid_dir = os.path.basename(os.path.dirname(os.path.dirname(volume_path)))
@@ -231,7 +231,7 @@ class VisionAuxClassifier(nn.Module):
 @dataclass
 class VisionTrainingArguments:
     model_name_or_path: str = field(
-        default="./LaMed/output/LaMed-Phi3-4B-finetune-freeze-viz-0000/hf",
+        default="GoodBaiBai88/M3D-LaMed-Phi-3-4B",
         metadata={"help": "Path or name of the checkpoint that contains the vision tower."}
     )
     model_type: str = field(
@@ -242,7 +242,7 @@ class VisionTrainingArguments:
         default="vit3d",
         metadata={"help": "Which vision tower in the loaded model (e.g. 'vit3d')."}
     )
-    pretrain_vision_model: str = field(default="/local2/amvepa91/M3D/LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin",
+    pretrain_vision_model: str = field(default="./LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin",
                                        metadata={"help": "Path to pretrained model for ViT."})
     freeze_vision_tower: bool = field(default=True, metadata={"help": "Whether to freeze vision tower weights."})
 
@@ -320,9 +320,9 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     # Example JSON paths for training
-    train_file = "/local2/amvepa91/MedTrinity-25M/nlst_aux_cancer_train_v4.json"
-    val_file = "/local2/amvepa91/MedTrinity-25M/nlst_aux_cancer_val_v4.json"
-    test_file = "/local2/amvepa91/MedTrinity-25M/nlst_aux_cancer_test_v4.json"
+    train_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_train_v5.json"
+    val_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_val_v5.json"
+    test_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_test_v5.json"
 
     if 'llama' in args.model_type.lower():
         base_model = LamedLlamaForCausalLM.from_pretrained(args.model_name_or_path)
