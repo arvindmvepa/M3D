@@ -256,32 +256,7 @@ class VisionTrainingArguments:
     tag: str = ""
     use_cls: bool = True
     use_weighted_loss: bool = field(default=False, metadata={"help": "Whether to use weighted binary cross entropy."})
-    pos_weight: float = field(default=None, metadata={"help": "Weight for positive class. If None, will be calculated from data."})
-    auto_pos_weight: bool = field(default=True, metadata={"help": "Automatically calculate pos_weight from training data."})
-
-# ...existing code...
-
-def calculate_pos_weight(dataset):
-    """Calculate positive weight based on class distribution in dataset."""
-    positive_count = 0
-    total_count = len(dataset)
-    
-    for i in range(total_count):
-        target = dataset[i]["target"]
-        if target == 1:
-            positive_count += 1
-    
-    negative_count = total_count - positive_count
-    
-    if positive_count == 0:
-        return torch.tensor(1.0)  # Default if no positives
-    
-    # Weight = neg_count / pos_count (upweight minority class)
-    pos_weight = negative_count / positive_count
-    print(f"Class distribution: {positive_count} positive, {negative_count} negative")
-    print(f"Calculated pos_weight: {pos_weight:.3f}")
-    
-    return torch.tensor(pos_weight)
+    pos_weight: float = field(default=None, metadata={"help": "Weight for positive class."})
 
 
 def evaluate(loader, model, device):
@@ -339,11 +314,11 @@ def main():
     parser = HfArgumentParser(VisionTrainingArguments)
     (args,) = parser.parse_args_into_dataclasses()
 
-    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_use_cls_{args.use_cls}_weighted_{args.use_weighted_loss}" + args.tag
+    output_dir = args.output_dir + f"_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_use_cls_{args.use_cls}_weighted_{args.use_weighted_loss}_pos_weight{args.pos_weight}" + args.tag
     os.makedirs(output_dir, exist_ok=True)
     logger = setup_logger(
         log_file=os.path.join(output_dir,
-                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_use_cls_{args.use_cls}_weighted_{args.use_weighted_loss}.log"),
+                              f"aux_model_name_{os.path.basename(args.pretrain_vision_model)}_freeze_vision_{args.freeze_vision_tower}_epochs_{args.num_epochs}_use_cls_{args.use_cls}_weighted_{args.use_weighted_loss}_pos_weight{args.pos_weight}.log"),
         log_to_console=True
     )
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -407,14 +382,9 @@ def main():
     # Calculate pos_weight if using weighted loss
     pos_weight = None
     if args.use_weighted_loss:
-        if args.auto_pos_weight:
-            pos_weight = calculate_pos_weight(train_dataset).to(device)
-            logger.info(f"Using auto-calculated pos_weight: {pos_weight.item():.3f}")
-        elif args.pos_weight is not None:
-            pos_weight = torch.tensor(args.pos_weight).to(device)
-            logger.info(f"Using manual pos_weight: {pos_weight.item():.3f}")
-        else:
-            logger.warning("use_weighted_loss=True but no pos_weight specified. Using unweighted loss.")
+        assert args.pos_weight is not None, "use_weighted_loss=True but no pos_weight specified."
+        pos_weight = torch.tensor(args.pos_weight).to(device)
+        logger.info(f"Using pos_weight: {pos_weight.item():.3f}")
 
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
     best_val_loss = float('inf')
