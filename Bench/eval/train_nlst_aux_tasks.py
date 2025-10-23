@@ -58,7 +58,7 @@ _RULES = [
 ]
 
 
-def get_npy_path(volume_path, img_root="/data/lung/nlst/NLST_CT_npy"):
+def get_npy_path(volume_path, img_root="/hsuraid/avepa/nlst_npy"):
     volume_name = os.path.basename(volume_path)
     time_point_dir = os.path.basename(os.path.dirname(volume_path))
     pid_dir = os.path.basename(os.path.dirname(os.path.dirname(volume_path)))
@@ -324,9 +324,9 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     # Example JSON paths for training
-    train_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_train_v5.json"
-    val_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_val_v5.json"
-    test_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_test_v5.json"
+    train_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_train_v6.json"
+    val_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_val_v6.json"
+    test_file = "/home/avepa/MedTrinity-25M/nlst_aux_cancer_test_v6.json"
 
     if 'llama' in args.model_type.lower():
         base_model = LamedLlamaForCausalLM.from_pretrained(args.model_name_or_path)
@@ -422,7 +422,7 @@ def main():
                 target = batch["target"].to(device)
 
                 logits = model(image)
-                v_loss = compute_aux_loss(logits, target)
+                v_loss = compute_aux_loss(logits, targets, pos_weight=pos_weight)
 
                 val_total_loss += v_loss.item()
 
@@ -453,7 +453,7 @@ def main():
             target = batch["target"].to(device)
 
             logits = model(image)
-            t_loss = compute_aux_loss(logits, target)
+            t_loss = compute_aux_loss(logits, targets, pos_weight=pos_weight)
 
             test_total_loss += t_loss.item()
 
