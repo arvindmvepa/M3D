@@ -123,8 +123,9 @@ def main():
     print(f"Output path: {output_path}")
     with open(output_path, mode='w') as outfile:
         writer = csv.writer(outfile)
-        writer.writerow(["Question Type", "Question", "Answer", "Pred", "accuracy", "bleu", "rouge1", "meteor", "bert_f1"])
+        writer.writerow(["seg_file", "Question Type", "Question", "Answer", "Pred" "accuracy", "bleu", "rouge1", "meteor", "bert_f1"])
         for sample in tqdm(test_dataloader):
+            seg_file = sample["seg_file"][0]
             question = sample["question"][0]
             question_type = sample["question_type"][0]
             answer = sample['answer']
@@ -168,7 +169,7 @@ def main():
                 result["bert_f1"] = np.nan
 
             writer.writerow(
-                [question_type, question, answer[0], generated_texts[0], result["accuracy"], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
+                [seg_file, question_type, question, answer[0], generated_texts[0], result["accuracy"], result["bleu"], result["rouge1"], result["meteor"], result["bert_f1"]])
 
 if __name__ == "__main__":
     main()

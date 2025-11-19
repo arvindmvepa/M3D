@@ -425,6 +425,7 @@ class VQABratsDataset(VQADataset):
             'qid': data.get("qid", 0),
             'volume_file_id': data.get("volume_file_id", 0),
             'volume_file_dir': data.get("volume_file_dir", ""),
+            'volume_seg_file': data.get("volume_seg_file") if data.get("volume_seg_file") else data.get("volume_non_seg_files")['t1c'].replace('t1c', 'seg'),
             'question_clean': data.get("question"),
             'label_name': data.get("label_name", ""),
             'q_lang': data.get("q_lang", ""),

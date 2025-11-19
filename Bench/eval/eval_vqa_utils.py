@@ -19,8 +19,9 @@ def main(vqa_data_test_path, output_dir):
         # skip first row
         next(reader)
         for row, sample in tqdm(zip(reader, data_list)):
-            pred = str(row[3])
-            accuracy = float(row[4])
+            pred = str(row[4])
+            accuracy = float(row[5])
+            seg_file = sample["seg_file"]
             answer = sample['answer']
             q_lang = sample['q_lang']
             qid = sample.get('qid', None)
@@ -30,7 +31,7 @@ def main(vqa_data_test_path, output_dir):
             question_clean = sample.get('question_clean', None)
             content_type = sample.get('content_type', None)
             label_name = sample.get('label_name', None)
-            content.append({'volume_file_id': volume_file_id, 'volume_file_dir': volume_file_dir, "accuracy": accuracy,
+            content.append({'seg_file': seg_file, 'volume_file_id': volume_file_id, 'volume_file_dir': volume_file_dir, "accuracy": accuracy,
                             'study_name': study_name,'question_clean': question_clean, 'pred': pred, 'answer': answer,
                             'q_lang': q_lang, 'content_type': content_type, 'label_name': label_name, "qid": qid})
     with open(output_eval_path, 'w') as f:
