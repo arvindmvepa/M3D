@@ -384,7 +384,9 @@ class VQABratsDataset(VQADataset):
         image = torch.stack(image, axis=0)
 
         question = data["question"]
-        answer = str(data["answer"])
+        answer = data.get('answer')
+        if answer is None:
+            answer = data['answer_gen']
 
 
         question = self.image_tokens + ' ' + question
