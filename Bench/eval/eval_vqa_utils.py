@@ -22,7 +22,9 @@ def main(vqa_data_test_path, output_dir):
             seg_file = str(row[0])
             pred = str(row[4])
             accuracy = float(row[5])
-            answer = sample['answer']
+            answer = sample('answer')
+            if answer is None:
+                answer = sample['answer_gen']
             q_lang = sample['q_lang']
             qid = sample.get('qid', None)
             volume_file_id = sample.get('volume_file_id', None)
