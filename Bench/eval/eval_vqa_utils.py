@@ -19,9 +19,9 @@ def main(vqa_data_test_path, output_dir):
         # skip first row
         next(reader)
         for row, sample in tqdm(zip(reader, data_list)):
+            seg_file = str(row[0])
             pred = str(row[4])
             accuracy = float(row[5])
-            seg_file = sample["seg_file"]
             answer = sample['answer']
             q_lang = sample['q_lang']
             qid = sample.get('qid', None)
