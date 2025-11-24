@@ -46,12 +46,12 @@ test_path=/local2/amvepa91/MedTrinity-25M/brats_gli_met_3d_vqa_subjTrue_test_upd
 #--model_with_lora="$output_dir"/model_with_lora.bin \
 #--output_dir="$output_dir"/hf
 
-PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval1/eval_vqa.py \
+PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --output_dir $output_dir/eval_vqa1 \
 --model_name_or_path "$output_dir"/hf \
 --vqa_data_test_path $test_path \
 
-PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval1/eval_vqa_utils.py \
+PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
 --output_dir $output_dir/eval_vqa1 \
 --gt_file $test_path \
 
