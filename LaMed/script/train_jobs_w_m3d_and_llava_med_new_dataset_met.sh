@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # m3d job
-output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-again-new-dataset-gli_met_v11-0000
-train_path=/local2/amvepa91/MedTrinity-25M/brats_gli_met_3d_vqa_subjTrue_train_updated_v11_seed0_multitask_fixed.json
-val_path=/local2/amvepa91/MedTrinity-25M/brats_gli_met_3d_vqa_subjTrue_val_updated_v11_seed0_multitask_fixed.json
-test_path=/local2/amvepa91/MedTrinity-25M/brats_gli_met_3d_vqa_subjTrue_test_updated_v11_seed0.json
+output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-again-new-dataset-met_v11-0000
+train_path=/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_train_updated_v11_seed0_multitask_fixed.json
+val_path=/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_val_updated_v11_seed0_multitask_fixed.json
+test_path=/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_test_updated_v11_seed0.json
 accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
@@ -57,10 +57,10 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
 
 
 # llava-med job
-output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-llava-med-again-new-dataset-gli_met-v11-0000
-train_path=/local2/amvepa91/MedTrinity-25M/brats_gli_met_3d_vqa_subjTrue_train_updated_v11_seed0_multitask_fixed.json
-val_path=/local2/amvepa91/MedTrinity-25M/brats_gli_met_3d_vqa_subjTrue_val_updated_v11_seed0_multitask_fixed.json
-test_path=/local2/amvepa91/MedTrinity-25M/brats_gli_met_3d_vqa_subjTrue_test_updated_v11_seed0_multitask_fixed.json
+output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-llava-med-again-new-dataset-met-v11-0000
+train_path=/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_train_updated_v11_seed0_multitask_fixed.json
+val_path=/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_val_updated_v11_seed0_multitask_fixed.json
+test_path=/local2/amvepa91/MedTrinity-25M/brats_met_3d_vqa_subjTrue_test_updated_v11_seed0_multitask_fixed.json
 accelerate launch --gpu_ids $1 --main_process_port 29601 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
