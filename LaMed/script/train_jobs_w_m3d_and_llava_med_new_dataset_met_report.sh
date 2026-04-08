@@ -58,7 +58,7 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
 
 
 # llava-med job
-output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-llava-med-again-new-dataset-gli_met_report-v11-0000
+output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-llava-med-again-new-dataset-met_report-v11-0000
 accelerate launch --gpu_ids $1 --main_process_port 29601 LaMed/src/train/train.py \
     --version v0 \
     --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
@@ -105,7 +105,7 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES="" python LaMed/src/utils/merge_lora_weights_a
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --model_name_or_path "$output_dir"/hf \
---output_dir $output_dir/eval_vqa \
+--output_dir $output_dir/eval_vqa1 \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
