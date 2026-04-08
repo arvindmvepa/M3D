@@ -48,12 +48,12 @@ test_path=/local2/amvepa91/MedTrinity-25M/brats_goat_3d_vqa_subjTrue_test_update
 #--output_dir="$output_dir"/hf
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
---output_dir $output_dir/eval_vqa1 \
+--output_dir $output_dir/eval_vqa2 \
 --model_name_or_path "$output_dir"/hf \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
---output_dir $output_dir/eval_vqa1 \
+--output_dir $output_dir/eval_vqa2 \
 --gt_file $test_path \
 
 
@@ -105,9 +105,9 @@ output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --model_name_or_path "$output_dir"/hf \
---output_dir $output_dir/eval_vqa \
+--output_dir $output_dir/eval_vqa2 \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
---output_dir $output_dir/eval_vqa \
+--output_dir $output_dir/eval_vqa2 \
 --gt_file $test_path \
