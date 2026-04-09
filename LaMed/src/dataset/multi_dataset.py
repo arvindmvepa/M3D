@@ -268,13 +268,32 @@ class VQADataset(Dataset):
                 mtf.RandFlip(prob=0.10, spatial_axis=2),
                 mtf.RandScaleIntensity(factors=0.1, prob=0.5),
                 mtf.RandShiftIntensity(offsets=0.1, prob=0.5),
-
+                mtf.Rand3DElastic(
+                    prob=0.30,
+                    sigma_range=(5, 7),
+                    magnitude_range=(2, 4),
+                    rotate_range=(0.03, 0.03, 0.03),
+                    scale_range=(0.03, 0.03, 0.03),
+                    mode="bilinear",
+                    padding_mode="border",
+                ),
                 mtf.ToTensor(dtype=torch.float),
             ]
         )
 
         val_transform = mtf.Compose(
                 [
+                    mtf.RandScaleIntensity(factors=0.1, prob=0.5),
+                    mtf.RandShiftIntensity(offsets=0.1, prob=0.5),
+                    mtf.Rand3DElastic(
+                        prob=0.30,
+                        sigma_range=(5, 7),
+                        magnitude_range=(2, 4),
+                        rotate_range=(0.03, 0.03, 0.03),
+                        scale_range=(0.03, 0.03, 0.03),
+                        mode="bilinear",
+                        padding_mode="border",
+                    ),
                     mtf.ToTensor(dtype=torch.float),
                 ]
             )
