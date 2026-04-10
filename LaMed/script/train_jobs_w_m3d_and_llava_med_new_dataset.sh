@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # m3d job
-output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-again-new-dataset-v11-0000
-train_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_updated_v11_seed0_multitask_fixed.json
-val_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_updated_v11_seed0_multitask_fixed.json
-test_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_updated_v11_seed0_filt_multitask_fixed.json
+output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-again-new-dataset-v13-0000
+train_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_train_updated_v13_seed0_multitask_fixed.json
+val_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_val_updated_v13_seed0_multitask_fixed.json
+test_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_updated_v13_seed0.json
 #accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
 #    --version v0 \
 #    --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
@@ -47,17 +47,17 @@ test_path=/local2/amvepa91/MedTrinity-25M/brats_gli_3d_vqa_subjTrue_test_updated
 #--output_dir="$output_dir"/hf
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
---output_dir $output_dir/eval_vqa4 \
+--output_dir $output_dir/eval_vqa_formal \
 --model_name_or_path "$output_dir"/hf \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
---output_dir $output_dir/eval_vqa4 \
+--output_dir $output_dir/eval_vqa_formal \
 --gt_file $test_path \
 
 
 # llava-med job
-output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-llava-med-again-new-dataset-v11-0000
+output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-llava-med-again-new-dataset-v13-0000
 #accelerate launch --gpu_ids $1 --main_process_port 29601 LaMed/src/train/train.py \
 #    --version v0 \
 #    --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
@@ -103,9 +103,9 @@ output_dir=./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa.py \
 --model_name_or_path "$output_dir"/hf \
---output_dir $output_dir/eval_vqa4 \
+--output_dir $output_dir/eval_vqa_formal \
 --vqa_data_test_path $test_path \
 
 PYTHONPATH=. CUDA_VISIBLE_DEVICES=$1 python Bench/eval/eval_vqa_utils.py \
---output_dir $output_dir/eval_vqa4 \
+--output_dir $output_dir/eval_vqa_formal \
 --gt_file $test_path \

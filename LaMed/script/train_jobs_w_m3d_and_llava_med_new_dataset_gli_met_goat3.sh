@@ -12,14 +12,14 @@ accelerate launch --gpu_ids $1 LaMed/src/train/train.py \
     --multimodal True \
     --combined_projector True \
     --freeze_vision_tower True \
-    --pretrain_mm_mlp_adapter ./LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
-    --pretrain_mllm ./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-again-new-dataset-gli_met_goat_no_pretrain_v11-0000/hf/merged_model.bin \
+    --pretrain_mm_mlp_adapter /local2/amvepa91/M3D/LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
+    --pretrain_mllm /local2/amvepa91/M3D/LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-again-new-dataset-gli_met_goat_no_pretrain_v11-0000/hf/merged_model.bin \
     --vqa_data_train_path $train_path \
     --vqa_data_val_path $val_path \
     --vqa_data_test_path $test_path \
     --lora_enable True \
     --vision_tower vit3d \
-    --pretrain_vision_model ./LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
+    --pretrain_vision_model /local2/amvepa91/M3D/LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
     --bf16 True \
     --output_dir $output_dir \
     --num_train_epochs 2 \
@@ -66,14 +66,14 @@ accelerate launch --gpu_ids $1 --main_process_port 29601 LaMed/src/train/train.p
     --multimodal True \
     --combined_projector True \
     --freeze_vision_tower True \
-    --pretrain_mm_mlp_adapter ./LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
-    --pretrain_mllm ./LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-llava-med-again-new-dataset-gli_met_goat_no_pretrain-v11-0000/hf/merged_model.bin \
+    --pretrain_mm_mlp_adapter /local2/amvepa91/M3D/LaMed/pretrained_model/M3D-LaMed-Phi-3-4B/mm_projector.bin \
+    --pretrain_mllm /local2/amvepa91/M3D/LaMed/output/LaMed-Phi3-4B-multimodal-combined-finetune-freeze-viz-llava-med-again-new-dataset-gli_met_goat_no_pretrain-v11-0000/hf/merged_model.bin \
     --vqa_data_train_path $train_path \
     --vqa_data_val_path $val_path \
     --vqa_data_test_path $test_path \
     --lora_enable True \
     --vision_tower vit3d \
-    --pretrain_vision_model ./LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
+    --pretrain_vision_model /local2/amvepa91/M3D/LaMed/pretrained_model/M3D-CLIP/pretrained_ViT.bin \
     --bf16 True \
     --output_dir $output_dir \
     --num_train_epochs 2 \
