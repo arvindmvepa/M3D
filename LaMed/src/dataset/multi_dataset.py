@@ -6,6 +6,7 @@ from torch.utils.data import Dataset, ConcatDataset
 
 import json
 import pandas as pd
+import random
 
 import monai.transforms as mtf
 from monai.data import load_decathlon_datalist
@@ -286,6 +287,8 @@ class VQADataset(Dataset):
             self.transform = val_transform
         elif 'test' in mode:
             self.transform = val_transform
+        
+        self.random_state = random.Random(42)
 
     def __len__(self):
         return len(self.data_list)
@@ -375,11 +378,14 @@ class VQABratsDataset(VQADataset):
         data = self.data_list[idx]
 
         image = []
+        modality_to_zero = self.random_state.choice(["t1c", "t1n", "t2f", "t2w"])
         for modality in ["t1c", "t1n", "t2f", "t2w"]:
             image_abs_path = data["volume_non_seg_files"][modality]
             new_image_abs_path = self.convert_file_path_to_npy(image_abs_path)
             image_ = np.load(new_image_abs_path)
             image_ = self.transform(image_)
+            if modality == modality_to_zero:
+                image_ = torch.zeros_like(image_)
             image.append(image_)
         image = torch.stack(image, axis=0)
 
